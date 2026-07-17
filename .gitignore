@@ -1,0 +1,10 @@
+.worktrees/
+node_modules/
+dist/
+data/
+uploads/
+exports/
+.env
+playwright-report/
+test-results/
+coverage/
