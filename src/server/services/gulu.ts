@@ -90,7 +90,7 @@ export class GuluService {
   setStatus(id:string,status:'running'|'paused'|'stopped'|'completed'|'needs_attention'):GuluConnectorTask {
     const current=this.getTask(id);const allowed:Record<string,string[]>={running:['queued','paused','needs_attention'],paused:['queued','running'],stopped:['queued','running','paused','needs_attention'],completed:['queued','running'],needs_attention:['queued','running']};
     if(!allowed[status]?.includes(current.status))return current;
-    this.db.prepare('UPDATE gulu_tasks SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(status,id);
+    this.db.prepare('UPDATE gulu_tasks SET status=?,last_error=CASE WHEN ?=? THEN NULL ELSE last_error END,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(status,status,'completed',id);
     if(status==='completed'){
       const row=this.db.prepare('SELECT job_id,mode FROM gulu_tasks WHERE id=?').get(id) as {job_id:string;mode:string};const plan=this.getPlan(row.job_id);
       if(plan){if(row.mode==='dry-run')plan.rollout.dryRunCompleted=true;if(row.mode==='pilot')plan.rollout.pilotCompleted=true;this.db.prepare('UPDATE gulu_search_plans SET plan_json=?,updated_at=CURRENT_TIMESTAMP WHERE job_id=?').run(JSON.stringify(plan),row.job_id);}

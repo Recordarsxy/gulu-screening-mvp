@@ -74,4 +74,10 @@ describe('Gulu service', () => {
     const {service}=setup();service.confirmPlan('job-1',draft);service.startTask('job-1','dry-run');
     expect(()=>service.startTask('job-1','dry-run')).toThrow('gulu_task_already_active');
   });
+
+  it('clears a recovered connector error when the task completes',()=>{
+    const {service}=setup();service.confirmPlan('job-1',draft);const task=service.startTask('job-1','dry-run');
+    service.recordFailure(task.id,'temporary_adapter_error');
+    expect(service.setStatus(task.id,'completed').lastError).toBeNull();
+  });
 });

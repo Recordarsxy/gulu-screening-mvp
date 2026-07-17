@@ -11,6 +11,12 @@ describe('Chrome extension safety boundary', () => {
     expect(source).toContain("task.mode === 'pilot' && totalRead >= 5");
   });
 
+  it('keeps a diagnostic listener available when the page adapter cannot load', async()=>{
+    const source=await readFile(new URL('../extension/content.js',import.meta.url),'utf8');
+    expect(source).toContain('adapter_import_failed:');
+    expect(source).toContain('adapterPromise');
+  });
+
   it('uses Manifest V3 with no sensitive browser permissions', async () => {
     const manifest = JSON.parse(await readFile(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
     expect(manifest.manifest_version).toBe(3);
