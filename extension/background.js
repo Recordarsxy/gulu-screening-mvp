@@ -87,7 +87,8 @@ async function waitListSettled(tabId, expectedPage, { minimumDelay = 0, previous
 }
 
 async function restoreList(tabId, round, page, submit) {
-  await chrome.tabs.update(tabId, { url: GULU });
+  chrome.tabs.update(tabId, { url: GULU }).catch(() => {});
+  await delay(500);
   let state = await waitReady(tabId);
   chrome.tabs.reload(tabId).catch(() => {});
   await delay(500);
