@@ -89,7 +89,8 @@ async function waitListSettled(tabId, expectedPage, { minimumDelay = 0, previous
 async function restoreList(tabId, round, page, submit) {
   await chrome.tabs.update(tabId, { url: GULU });
   let state = await waitReady(tabId);
-  await chrome.tabs.reload(tabId);
+  chrome.tabs.reload(tabId).catch(() => {});
+  await delay(500);
   state = await waitReady(tabId);
   if (state.state === 'login_required' || state.state === 'captcha') return state;
   if (state.state !== 'list') throw new Error('unsupported_page');
