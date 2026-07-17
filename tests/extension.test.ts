@@ -31,9 +31,10 @@ describe('Chrome extension safety boundary', () => {
     expect(source).toContain('minimumDelay: 2500');
   });
 
-  it('does not accept a transient empty list before ten seconds',async()=>{
+  it('waits up to sixty seconds for candidates or an explicit empty state',async()=>{
     const source=await readFile(new URL('../extension/background.js',import.meta.url),'utf8');
-    expect(source).toContain('state.count > 0 || Date.now() - started >= 10000');
+    expect(source).toContain('attempt < 150');
+    expect(source).toContain('state.resultReady');
   });
 
   it('reloads the neutral candidate list before applying each search plan',async()=>{
