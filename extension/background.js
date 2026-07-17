@@ -65,6 +65,25 @@ function candidateEventId(task, seed) {
   return `candidate:${task.id}:${task.currentRound}:${seed.guluId}`;
 }
 
+async function waitListSettled(tabId, expectedPage, { minimumDelay = 0, previousSignature = null } = {}) {
+  const started = Date.now();
+  let stableSignature = null;
+  let stableCount = 0;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    await delay(400);
+    const state = await send(tabId, 'inspectListState');
+    const changed = previousSignature === null || state.signature !== previousSignature || expectedPage === 1;
+    if (!state.loading && state.page === expectedPage && changed && Date.now() - started >= minimumDelay) {
+      stableCount = state.signature === stableSignature ? stableCount + 1 : 1;
+      stableSignature = state.signature;
+      if (stableCount >= 2) return state;
+    } else {
+      stableCount = 0;
+    }
+  }
+  throw new Error('list_not_settled');
+}
+
 async function restoreList(tabId, round, page, submit) {
   await chrome.tabs.update(tabId, { url: GULU });
   let state = await waitReady(tabId);
@@ -73,12 +92,13 @@ async function restoreList(tabId, round, page, submit) {
 
   await send(tabId, 'applyFilters', { filters: round.filters, submit });
   if (!submit) return { state: 'list' };
-  await delay(1500);
+  await waitListSettled(tabId, 1, { minimumDelay: 800 });
 
   for (let current = 1; current < page; current += 1) {
+    const before = await send(tabId, 'inspectListState');
     const hasNext = await send(tabId, 'nextPage');
     if (!hasNext) throw new Error('page_restore_failed');
-    await delay(1200);
+    await waitListSettled(tabId, current + 1, { minimumDelay: 400, previousSignature: before.signature });
   }
   state = await send(tabId, 'inspectState');
   if (state.state !== 'list') throw new Error(state.state);
@@ -121,11 +141,11 @@ async function runOnce() {
     }
 
     const list = await send(tab.id, 'readList', { page: task.page });
-    const cap = task.mode === 'pilot' ? 5 : round.limit;
     let cursor = task.candidateCursor;
     let roundRead = task.roundReadCount;
+    let totalRead = task.readCount;
 
-    while (cursor < list.length && roundRead < cap) {
+    while (cursor < list.length && (task.mode === 'pilot' ? totalRead < 5 : roundRead < round.limit)) {
       const seed = list[cursor];
       const stableEventId = candidateEventId(task, seed);
       let lastError = null;
@@ -143,6 +163,7 @@ async function runOnce() {
           await event(task.id, 'candidate', { snapshot }, stableEventId);
           lastError = null;
           roundRead += 1;
+          totalRead += 1;
           break;
         } catch (error) {
           lastError = error;
@@ -166,11 +187,18 @@ async function runOnce() {
       await pace();
     }
 
-    if (roundRead >= cap || list.length === 0) {
-      if (task.currentRound === 'company' && task.mode !== 'pilot') {
+    if (task.mode === 'pilot' && totalRead >= 5) {
+      await event(task.id, 'completed', {}, `complete:${task.id}`);
+      return;
+    }
+
+    if ((task.mode !== 'pilot' && roundRead >= round.limit) || list.length === 0) {
+      if (task.currentRound === 'company') {
         await event(task.id, 'checkpoint', {
           checkpoint: { currentRound: 'role', page: 1, candidateCursor: 0 },
         }, `round:${task.id}:role`);
+      } else if (task.mode === 'pilot') {
+        await event(task.id, 'needs_attention', { error: 'pilot_insufficient_candidates' }, `attention:${task.id}:pilot-insufficient`);
       } else {
         await event(task.id, 'completed', {}, `complete:${task.id}`);
       }
@@ -186,6 +214,8 @@ async function runOnce() {
       await event(task.id, 'checkpoint', {
         checkpoint: { currentRound: 'role', page: 1, candidateCursor: 0 },
       }, `round:${task.id}:role`);
+    } else if (task.mode === 'pilot') {
+      await event(task.id, 'needs_attention', { error: 'pilot_insufficient_candidates' }, `attention:${task.id}:pilot-insufficient`);
     } else {
       await event(task.id, 'completed', {}, `complete:${task.id}`);
     }
@@ -198,6 +228,7 @@ async function runOnce() {
         'unsupported_page',
         'gulu_tab_unavailable',
         'page_restore_failed',
+        'list_not_settled',
         'permission_denied',
       ].includes(message);
       await event(

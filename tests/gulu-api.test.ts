@@ -5,8 +5,8 @@ import { createApp } from '../src/server/app.js'; import { DeepSeekProvider } fr
 
 describe('Gulu connector API',()=>{
  const close:Array<()=>void>=[]; afterEach(()=>close.splice(0).forEach(x=>x()));
- async function setup(){
-  const provider=new DeepSeekProvider({apiKey:'test',fetcher:async()=>new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({rounds:[{kind:'company',filters:{companies:['示例科技']}},{kind:'role',filters:{roles:['产品经理']}}]})}}]}),{status:200})});
+ async function setup(onAssessment?:()=>Promise<void>){
+  const provider=new DeepSeekProvider({apiKey:'test',fetcher:async(_url,init)=>{const body=JSON.parse(String(init?.body??'{}'));const assessment=String(body.messages?.[0]?.content??'').includes('招聘筛选助手');if(assessment)await onAssessment?.();const content=assessment?{label:'review',reasonCode:'NEEDS_REVIEW',evidence:['测试证据']}:{rounds:[{kind:'company',filters:{companies:['示例科技']}},{kind:'role',filters:{roles:['产品经理']}}]};return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify(content)}}]}),{status:200})}});
   const db=openDatabase(':memory:');migrate(db);const http=createApp({db,dataRoot:process.cwd(),deepSeek:provider}).listen(0,'127.0.0.1');await new Promise<void>(r=>http.once('listening',r));close.push(()=>{http.close();db.close()});const port=(http.address() as AddressInfo).port;
   return async(path:string,init:RequestInit={})=>{const response=await fetch(`http://127.0.0.1:${port}${path}`,{...init,headers:{'content-type':'application/json',...init.headers}});const data=await response.json();return {status:response.status,data}};
  }
@@ -17,8 +17,18 @@ describe('Gulu connector API',()=>{
   expect((await request(`/api/jobs/${jobId}/runs/gulu`,{method:'POST'})).status).toBe(409);
   await request(`/api/jobs/${jobId}/gulu-plan/confirm`,{method:'PUT',body:JSON.stringify(draft.data)});
   const task=await request(`/api/jobs/${jobId}/runs/gulu`,{method:'POST'});expect(task.status).toBe(201);
-  expect((await request('/api/connector/gulu/tasks/next')).status).toBe(401);
+ expect((await request('/api/connector/gulu/tasks/next')).status).toBe(401);
   const pairing=await request('/api/connectors/gulu/pairing',{method:'POST'});const redeemed=await request('/api/connector/gulu/pairing/redeem',{method:'POST',body:JSON.stringify({code:pairing.data.code,extensionVersion:'1.1.0'})});
   const next=await request('/api/connector/gulu/tasks/next',{headers:{authorization:`Bearer ${redeemed.data.token}`}});expect(next.data.task.id).toBe(task.data.id);expect(JSON.stringify(next.data)).not.toContain(redeemed.data.token);
+ });
+
+ it('coalesces concurrent retries for the same candidate event',async()=>{
+  let assessments=0;const request=await setup(async()=>{assessments+=1;await new Promise(r=>setTimeout(r,40))});
+  const created=await request('/api/jobs',{method:'POST',body:JSON.stringify({title:'产品经理',sourceText:'目标公司产品经理'})});const jobId=created.data.job_id;
+  await request(`/api/jobs/${jobId}/rules/1/approve`,{method:'POST'});const draft=await request(`/api/jobs/${jobId}/gulu-plan/generate`,{method:'POST'});await request(`/api/jobs/${jobId}/gulu-plan/confirm`,{method:'PUT',body:JSON.stringify(draft.data)});const task=await request(`/api/jobs/${jobId}/runs/gulu`,{method:'POST'});
+  const pairing=await request('/api/connectors/gulu/pairing',{method:'POST'});const redeemed=await request('/api/connector/gulu/pairing/redeem',{method:'POST',body:JSON.stringify({code:pairing.data.code,extensionVersion:'1.1.0'})});const headers={authorization:`Bearer ${redeemed.data.token}`};
+  const body=JSON.stringify({eventId:'candidate:stable',type:'candidate',snapshot:{guluId:'SYN-1',name:'候选人甲',detailUrl:'http://121.43.105.7/crm#candidate/detail?id=SYN-1',company:'示例科技',role:'待核实职位',sourceRound:'company',page:1,capturedAt:new Date().toISOString()}});
+  const [first,second]=await Promise.all([request(`/api/connector/gulu/tasks/${task.data.id}/events`,{method:'POST',headers,body}),request(`/api/connector/gulu/tasks/${task.data.id}/events`,{method:'POST',headers,body})]);
+  expect([first.status,second.status]).toEqual([200,200]);expect(assessments).toBe(1);
  });
 });

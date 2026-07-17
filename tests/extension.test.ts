@@ -6,7 +6,9 @@ describe('Chrome extension safety boundary', () => {
     const source=await readFile(new URL('../extension/background.js',import.meta.url),'utf8');
     expect(source).toContain('candidate:${task.id}:${task.currentRound}:${seed.guluId}');
     expect(source).toContain('async function restoreList');
+    expect(source).toContain('async function waitListSettled');
     expect(source).toContain('for (let current = 1; current < page; current += 1)');
+    expect(source).toContain("task.mode === 'pilot' && totalRead >= 5");
   });
 
   it('uses Manifest V3 with no sensitive browser permissions', async () => {
@@ -20,7 +22,7 @@ describe('Chrome extension safety boundary', () => {
 
   it('exposes only semantic read operations and strips forbidden fields', async () => {
     const adapter = await import('../extension/gulu-adapter.js');
-    expect(adapter.SEMANTIC_OPERATIONS).toEqual(['inspectState','applyFilters','readList','openDetail','readDetail','nextPage']);
+    expect(adapter.SEMANTIC_OPERATIONS).toEqual(['inspectState','inspectListState','applyFilters','readList','openDetail','readDetail','nextPage']);
     const safe=adapter.sanitizeSnapshot({guluId:'1',name:'甲',detailUrl:'http://121.43.105.7/crm#candidate/detail?id=1',company:'示例',role:'经理',phone:'13800000000',email:'a@b.com',notes:'秘密',sourceRound:'role',page:1,capturedAt:new Date().toISOString()});
     expect(safe).not.toHaveProperty('phone');expect(safe).not.toHaveProperty('email');expect(safe).not.toHaveProperty('notes');
     expect(Object.keys(safe).sort()).toEqual(expect.arrayContaining(['guluId','name','detailUrl','company','role']));

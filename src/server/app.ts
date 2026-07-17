@@ -20,6 +20,7 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider() }: A
   const engine = new ScreeningEngine(db, deepSeek);
   const gulu = new GuluService(db);
   const taskControllers=new Map<string,AbortController>();
+  const candidateRequests=new Map<string,Promise<unknown>>();
   app.disable('x-powered-by'); app.use(express.json({ limit: '2mb' }));
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, host: '127.0.0.1', mode: 'local-only', version: '1.1.0' }));
@@ -42,11 +43,14 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider() }: A
     const taskId=String(req.params.taskId);
     const taskState=gulu.getTask(taskId);if(!['queued','running'].includes(taskState.status))return res.status(409).json({error:'task_not_running'});
     if(type==='candidate') {
-      const recorded=gulu.recordCandidate(taskId,eventId,req.body.snapshot);
-      const task=gulu.getTask(taskId);const snapshot=req.body.snapshot;
-      const candidate={id:`${task.jobId}:gulu:${snapshot.guluId}`,jobId:task.jobId,dedupeKey:String(snapshot.guluId||snapshot.detailUrl),name:String(snapshot.name),guluId:String(snapshot.guluId),detailUrl:String(snapshot.detailUrl),currentCompany:String(snapshot.company??''),currentRole:String(snapshot.role??''),experiences:(snapshot.experiences??[]).map((item:Record<string,unknown>)=>({company:String(item.company??''),role:String(item.role??''),period:String(item.period??''),summary:String(item.summary??'')})),sourceRound:snapshot.sourceRound};
-      const controller=new AbortController();taskControllers.set(taskId,controller);
-      try{const assessed=await engine.assessCandidate(task.jobId,task.ruleVersion,candidate,controller.signal);const latest=gulu.getTask(taskId);if(!['queued','running'].includes(latest.status))return res.status(409).json({error:'task_not_running'});return res.json(assessed.created?gulu.recordAnalysis(taskId,assessed.decision.inputTokens,assessed.decision.outputTokens):recorded);}finally{if(taskControllers.get(taskId)===controller)taskControllers.delete(taskId);}
+      const requestKey=`${taskId}:${eventId}`;const existing=candidateRequests.get(requestKey);if(existing)return res.json(await existing);
+      const processing=(async()=>{const recorded=gulu.recordCandidate(taskId,eventId,req.body.snapshot);
+        const task=gulu.getTask(taskId);const snapshot=req.body.snapshot;
+        const candidate={id:`${task.jobId}:gulu:${snapshot.guluId}`,jobId:task.jobId,dedupeKey:String(snapshot.guluId||snapshot.detailUrl),name:String(snapshot.name),guluId:String(snapshot.guluId),detailUrl:String(snapshot.detailUrl),currentCompany:String(snapshot.company??''),currentRole:String(snapshot.role??''),experiences:(snapshot.experiences??[]).map((item:Record<string,unknown>)=>({company:String(item.company??''),role:String(item.role??''),period:String(item.period??''),summary:String(item.summary??'')})),sourceRound:snapshot.sourceRound};
+        const controller=new AbortController();taskControllers.set(taskId,controller);
+        try{const assessed=await engine.assessCandidate(task.jobId,task.ruleVersion,candidate,controller.signal);const latest=gulu.getTask(taskId);if(!['queued','running'].includes(latest.status))throw new Error('task_not_running');return assessed.created?gulu.recordAnalysis(taskId,assessed.decision.inputTokens,assessed.decision.outputTokens):recorded;}finally{if(taskControllers.get(taskId)===controller)taskControllers.delete(taskId);}
+      })();candidateRequests.set(requestKey,processing);
+      try{return res.json(await processing);}finally{if(candidateRequests.get(requestKey)===processing)candidateRequests.delete(requestKey);}
     }
     if(type==='failure') return res.json(gulu.recordFailure(taskId,String(req.body?.error??'connector_failure')));
     if(type==='checkpoint') return res.json(gulu.updateCheckpoint(taskId,req.body.checkpoint??{}));
