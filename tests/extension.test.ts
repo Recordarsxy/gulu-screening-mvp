@@ -7,6 +7,7 @@ describe('Chrome extension safety boundary', () => {
     expect(source).toContain('candidate:${task.id}:${task.currentRound}:${seed.guluId}');
     expect(source).toContain('async function restoreList');
     expect(source).toContain('async function waitListSettled');
+    expect(source).toContain("state.state === 'loading'");
     expect(source).toContain('for (let current = 1; current < page; current += 1)');
     expect(source).toContain("task.mode === 'pilot' && totalRead >= 5");
   });

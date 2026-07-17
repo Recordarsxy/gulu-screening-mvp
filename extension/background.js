@@ -34,7 +34,9 @@ async function waitReady(tabId) {
   for (let i = 0; i < 30; i += 1) {
     await delay(500);
     try {
-      return await send(tabId, 'inspectState');
+      const state = await send(tabId, 'inspectState');
+      if (state.state === 'loading') continue;
+      return state;
     } catch {}
   }
   throw new Error('gulu_tab_unavailable');
