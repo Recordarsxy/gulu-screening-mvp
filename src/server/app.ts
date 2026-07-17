@@ -39,6 +39,7 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider() }: A
   app.post('/api/connector/gulu/tasks/:taskId/events',connectorAuth,async(req,res,next)=>{try{
     const type=String(req.body?.type??''); const eventId=String(req.body?.eventId??''); if(!eventId) return res.status(400).json({error:'event_id_required'});
     const taskId=String(req.params.taskId);
+    const taskState=gulu.getTask(taskId);if(!['queued','running'].includes(taskState.status))return res.status(409).json({error:'task_not_running'});
     if(type==='candidate') {
       const recorded=gulu.recordCandidate(taskId,eventId,req.body.snapshot);if(recorded.duplicateEvent)return res.json(recorded);
       const task=gulu.getTask(taskId);const snapshot=req.body.snapshot;

@@ -84,7 +84,9 @@ export class GuluService {
   }
 
   setStatus(id:string,status:'running'|'paused'|'stopped'|'completed'|'needs_attention'):GuluConnectorTask {
-    this.db.prepare('UPDATE gulu_tasks SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(status,id); return this.getTask(id);
+    const current=this.getTask(id);const allowed:Record<string,string[]>={running:['queued','paused','needs_attention'],paused:['queued','running'],stopped:['queued','running','paused','needs_attention'],completed:['queued','running'],needs_attention:['queued','running']};
+    if(!allowed[status]?.includes(current.status))return current;
+    this.db.prepare('UPDATE gulu_tasks SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(status,id);return this.getTask(id);
   }
 
   pauseForReason(id:string,reason:string):GuluConnectorTask {
@@ -93,7 +95,7 @@ export class GuluService {
 
   createPairing():{code:string;expiresAt:string} {
     const code=String(randomInt(0,1_000_000)).padStart(6,'0'); const expiresAt=new Date(Date.now()+10*60_000).toISOString();
-    this.db.prepare(`UPDATE gulu_connector SET pairing_code_hash=?,pairing_expires_at=?,token_hash=NULL,paired_at=NULL,gulu_status='awaiting_pairing',last_error=NULL WHERE singleton=1`)
+    this.db.prepare(`UPDATE gulu_connector SET pairing_code_hash=?,pairing_expires_at=?,gulu_status='awaiting_pairing',last_error=NULL WHERE singleton=1`)
       .run(sha256(code),expiresAt); return {code,expiresAt};
   }
 

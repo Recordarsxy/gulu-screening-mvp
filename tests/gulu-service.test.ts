@@ -34,6 +34,8 @@ describe('Gulu service', () => {
     const row=db.prepare('SELECT token_hash FROM gulu_connector').get() as {token_hash:string};
     expect(row.token_hash).not.toContain(redeemed.token);
     expect(service.authenticate(redeemed.token)).toBe(true);
+    service.createPairing();
+    expect(service.authenticate(redeemed.token)).toBe(true);
   });
 
   it('deduplicates snapshots across rounds and persists a restartable cursor', async () => {
@@ -51,5 +53,11 @@ describe('Gulu service', () => {
     const {service}=setup(); service.confirmPlan('job-1',draft); const task=service.startTask('job-1');
     service.recordFailure(task.id,'读取失败'); service.recordFailure(task.id,'读取失败');
     expect(service.recordFailure(task.id,'页面结构变化').status).toBe('needs_attention');
+  });
+
+  it('makes emergency stop terminal',()=>{
+    const {service}=setup();service.confirmPlan('job-1',draft);const task=service.startTask('job-1');service.setStatus(task.id,'running');
+    expect(service.setStatus(task.id,'stopped').status).toBe('stopped');
+    expect(service.setStatus(task.id,'running').status).toBe('stopped');
   });
 });
