@@ -24,6 +24,13 @@ describe('Chrome extension safety boundary', () => {
     expect(source).toContain("status: 'online', busy: true");
   });
 
+  it('waits for a committed query and three stable observations',async()=>{
+    const source=await readFile(new URL('../extension/background.js',import.meta.url),'utf8');
+    expect(source).toContain('state.queryReady');
+    expect(source).toContain('stableCount >= 3');
+    expect(source).toContain('minimumDelay: 2500');
+  });
+
   it('uses Manifest V3 with no sensitive browser permissions', async () => {
     const manifest = JSON.parse(await readFile(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
     expect(manifest.manifest_version).toBe(3);

@@ -75,10 +75,10 @@ async function waitListSettled(tabId, expectedPage, { minimumDelay = 0, previous
     await delay(400);
     const state = await send(tabId, 'inspectListState');
     const changed = previousSignature === null || state.signature !== previousSignature || expectedPage === 1;
-    if (!state.loading && state.page === expectedPage && changed && Date.now() - started >= minimumDelay) {
+    if (!state.loading && state.queryReady && state.page === expectedPage && changed && Date.now() - started >= minimumDelay) {
       stableCount = state.signature === stableSignature ? stableCount + 1 : 1;
       stableSignature = state.signature;
-      if (stableCount >= 2) return state;
+      if (stableCount >= 3) return state;
     } else {
       stableCount = 0;
     }
@@ -94,7 +94,7 @@ async function restoreList(tabId, round, page, submit) {
 
   await send(tabId, 'applyFilters', { filters: round.filters, submit });
   if (!submit) return { state: 'list' };
-  await waitListSettled(tabId, 1, { minimumDelay: 800 });
+  await waitListSettled(tabId, 1, { minimumDelay: 2500 });
 
   for (let current = 1; current < page; current += 1) {
     const before = await send(tabId, 'inspectListState');
