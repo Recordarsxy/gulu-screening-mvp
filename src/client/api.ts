@@ -3,7 +3,7 @@ export type JobPack=any;
 export type ResultItem={candidateId:string;name:string;guluId?:string;detailUrl?:string;currentCompany:string;currentRole:string;sourceRound:string;label:'recommend'|'review'|'exclude';reasonCode:string;evidence:string[];ruleVersion:number;reviewStatus:string;note:string};
 export type RunRecord={id:string;jobId:string;ruleVersion:number;status:'running'|'paused'|'completed'|'failed';cursor:number;total:number;inputTokens:number;outputTokens:number};
 export type GuluFilters={keywords:string[];companies:string[];roles:string[];cities:string[];industries:string[];functions:string[]};
-export type GuluPlan={jobId:string;ruleVersion:number;status:'draft'|'confirmed';confirmedAt:string|null;rounds:[{kind:'company';limit:number;filters:GuluFilters},{kind:'role';limit:number;filters:GuluFilters}]};
+export type GuluPlan={jobId:string;ruleVersion:number;status:'draft'|'confirmed';confirmedAt:string|null;rollout:{dryRunCompleted:boolean;pilotCompleted:boolean};rounds:[{kind:'company';limit:number;filters:GuluFilters},{kind:'role';limit:number;filters:GuluFilters}]};
 export type GuluTask={id:string;jobId:string;ruleVersion:number;mode:'dry-run'|'pilot'|'formal';status:string;currentRound:'company'|'role';page:number;candidateCursor:number;readCount:number;roundReadCount:number;dedupedCount:number;analyzedCount:number;inputTokens:number;outputTokens:number;lastError:string|null};
 export type ConnectorStatus={paired:boolean;extensionOnline:boolean;chromeOnline:boolean;guluStatus:string;extensionVersion?:string;lastError?:string};
 
@@ -14,7 +14,7 @@ export const api={
  getJob:(id:string)=>json<{job:any;pack:JobPack}>(`/api/jobs/${id}`),revise:(id:string,pack:JobPack)=>json<JobPack>(`/api/jobs/${id}/rules`,{method:'PUT',body:JSON.stringify(pack)}),approve:(id:string,v:number)=>json<JobPack>(`/api/jobs/${id}/rules/${v}/approve`,{method:'POST'}),
  runDemo:(id:string)=>json<RunRecord>(`/api/jobs/${id}/runs/demo`,{method:'POST'}),processRun:(id:string,limit=5)=>json<RunRecord>(`/api/runs/${id}/process`,{method:'POST',body:JSON.stringify({limit})}),
  connectorStatus:()=>json<ConnectorStatus>('/api/connectors/gulu/status'),createPairing:()=>json<{code:string;expiresAt:string}>('/api/connectors/gulu/pairing',{method:'POST'}),
- generateGuluPlan:(id:string)=>json<GuluPlan>(`/api/jobs/${id}/gulu-plan/generate`,{method:'POST'}),confirmGuluPlan:(id:string,plan:GuluPlan)=>json<GuluPlan>(`/api/jobs/${id}/gulu-plan/confirm`,{method:'PUT',body:JSON.stringify(plan)}),
+ getGuluPlan:(id:string)=>json<GuluPlan>(`/api/jobs/${id}/gulu-plan`),generateGuluPlan:(id:string)=>json<GuluPlan>(`/api/jobs/${id}/gulu-plan/generate`,{method:'POST'}),confirmGuluPlan:(id:string,plan:GuluPlan)=>json<GuluPlan>(`/api/jobs/${id}/gulu-plan/confirm`,{method:'PUT',body:JSON.stringify(plan)}),
  startGulu:(id:string,mode:GuluTask['mode'])=>json<GuluTask>(`/api/jobs/${id}/runs/gulu`,{method:'POST',body:JSON.stringify({mode})}),getRun:<T=RunRecord>(id:string)=>json<T>(`/api/runs/${id}`),
  pauseRun:<T=RunRecord>(id:string)=>json<T>(`/api/runs/${id}/pause`,{method:'POST'}),resumeRun:<T=RunRecord>(id:string)=>json<T>(`/api/runs/${id}/resume`,{method:'POST'}),stopRun:(id:string)=>json<GuluTask>(`/api/runs/${id}/stop`,{method:'POST'}),
  results:(id:string)=>json<{items:ResultItem[]}>(`/api/jobs/${id}/results`),review:(jobId:string,candidateId:string,ruleVersion:number,status:string,note:string)=>json(`/api/jobs/${jobId}/reviews/${encodeURIComponent(candidateId)}`,{method:'PUT',body:JSON.stringify({ruleVersion,status,note})}),

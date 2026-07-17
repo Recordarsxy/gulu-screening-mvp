@@ -71,6 +71,7 @@ export const GuluSearchPlanSchema = z.object({
   rounds: z.tuple([GuluSearchRoundSchema, GuluSearchRoundSchema])
     .refine((rounds) => rounds[0].kind === 'company' && rounds[1].kind === 'role', 'company_then_role'),
   confirmedAt: z.string().nullable().default(null),
+  rollout: z.object({dryRunCompleted:z.boolean().default(false),pilotCompleted:z.boolean().default(false)}).default({dryRunCompleted:false,pilotCompleted:false}),
 });
 export type GuluSearchPlan = z.infer<typeof GuluSearchPlanSchema>;
 

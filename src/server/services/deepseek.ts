@@ -43,7 +43,7 @@ export class DeepSeekProvider {
     return `${url.href.replace(/\/$/, '')}/chat/completions`;
   }
 
-  async generateJson<T = unknown>(instruction: string, payload: unknown): Promise<DeepSeekResult<T>> {
+  async generateJson<T = unknown>(instruction: string, payload: unknown, signal?:AbortSignal): Promise<DeepSeekResult<T>> {
     if (!this.apiKey) throw new DeepSeekError('missing_api_key');
     assertNoSensitiveText(payload);
     const response = await this.fetcher(this.endpoint(), {
@@ -59,6 +59,7 @@ export class DeepSeekProvider {
         stream: false,
         max_tokens: 1800,
       }),
+      signal,
     });
     if (!response.ok) {
       const text = (await response.text()).slice(0, 300);
@@ -76,11 +77,11 @@ export class DeepSeekProvider {
     };
   }
 
-  async assessCandidate(pack: JobPack, candidate: SafeCandidate): Promise<AiDecision> {
+  async assessCandidate(pack: JobPack, candidate: SafeCandidate, signal?:AbortSignal): Promise<AiDecision> {
     const result = await this.generateJson('你是招聘筛选助手。规则优先，信息缺失必须标记 review；只有简历中存在明确反证时才能 exclude。输出 label、reasonCode、evidence 的 json。', {
       rules: { constraints: pack.constraints, industries: pack.industries, roles: pack.roles, evidence: pack.evidence, decision_policy: pack.decision_policy },
       candidate,
-    });
+    },signal);
     const raw = result.data as Record<string, unknown>;
     const normalized = typeof raw.evidence === 'string' ? { ...raw, evidence: [raw.evidence] } : raw;
     const parsed = AiDecisionSchema.parse(normalized);

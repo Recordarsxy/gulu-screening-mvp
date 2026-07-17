@@ -17,7 +17,7 @@ export class GuluService {
     const current=getCurrentVersion(this.db,plan.jobId);
     if (!current) throw new Error('job_not_found');
     if (current.rule_version!==plan.ruleVersion) throw new Error('rule_version_unavailable');
-    const draft={...plan,status:'draft' as const,confirmedAt:null};
+    const draft={...plan,status:'draft' as const,confirmedAt:null,rollout:{dryRunCompleted:false,pilotCompleted:false}};
     this.db.prepare(`INSERT INTO gulu_search_plans(job_id,rule_version,status,plan_json,confirmed_at) VALUES (?,?,?,?,NULL)
       ON CONFLICT(job_id) DO UPDATE SET rule_version=excluded.rule_version,status='draft',plan_json=excluded.plan_json,confirmed_at=NULL,updated_at=CURRENT_TIMESTAMP`)
       .run(plan.jobId,plan.ruleVersion,'draft',JSON.stringify(draft));
@@ -30,7 +30,7 @@ export class GuluService {
     if (!pack) throw new Error('job_not_found');
     if (pack.approval.status!=='approved') throw new Error('rules_not_approved');
     if (pack.rule_version!==parsed.ruleVersion) throw new Error('rule_version_unavailable');
-    const plan={...parsed,status:'confirmed' as const,confirmedAt:new Date().toISOString()};
+    const plan={...parsed,status:'confirmed' as const,confirmedAt:new Date().toISOString(),rollout:{dryRunCompleted:false,pilotCompleted:false}};
     this.db.prepare(`INSERT INTO gulu_search_plans(job_id,rule_version,status,plan_json,confirmed_at) VALUES (?,?,?,?,?)
       ON CONFLICT(job_id) DO UPDATE SET rule_version=excluded.rule_version,status=excluded.status,plan_json=excluded.plan_json,confirmed_at=excluded.confirmed_at,updated_at=CURRENT_TIMESTAMP`)
       .run(jobId,plan.ruleVersion,'confirmed',JSON.stringify(plan),plan.confirmedAt);
@@ -44,6 +44,10 @@ export class GuluService {
 
   startTask(jobId:string,mode:'dry-run'|'pilot'|'formal'='dry-run'):GuluConnectorTask {
     const plan=this.getPlan(jobId); if (!plan || plan.status!=='confirmed') throw new Error('gulu_plan_not_confirmed');
+    if(mode==='pilot'&&!plan.rollout.dryRunCompleted)throw new Error('gulu_dry_run_required');
+    if(mode==='formal'&&!plan.rollout.pilotCompleted)throw new Error('gulu_pilot_required');
+    const active=this.db.prepare("SELECT 1 ok FROM gulu_tasks WHERE job_id=? AND status IN ('queued','running','paused','needs_attention')").get(jobId);
+    if(active)throw new Error('gulu_task_already_active');
     const id=randomUUID(); this.db.prepare('INSERT INTO gulu_tasks(id,job_id,rule_version,status,mode) VALUES (?,?,?,?,?)').run(id,jobId,plan.ruleVersion,'queued',mode);
     return this.getTask(id);
   }
@@ -86,7 +90,12 @@ export class GuluService {
   setStatus(id:string,status:'running'|'paused'|'stopped'|'completed'|'needs_attention'):GuluConnectorTask {
     const current=this.getTask(id);const allowed:Record<string,string[]>={running:['queued','paused','needs_attention'],paused:['queued','running'],stopped:['queued','running','paused','needs_attention'],completed:['queued','running'],needs_attention:['queued','running']};
     if(!allowed[status]?.includes(current.status))return current;
-    this.db.prepare('UPDATE gulu_tasks SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(status,id);return this.getTask(id);
+    this.db.prepare('UPDATE gulu_tasks SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(status,id);
+    if(status==='completed'){
+      const row=this.db.prepare('SELECT job_id,mode FROM gulu_tasks WHERE id=?').get(id) as {job_id:string;mode:string};const plan=this.getPlan(row.job_id);
+      if(plan){if(row.mode==='dry-run')plan.rollout.dryRunCompleted=true;if(row.mode==='pilot')plan.rollout.pilotCompleted=true;this.db.prepare('UPDATE gulu_search_plans SET plan_json=?,updated_at=CURRENT_TIMESTAMP WHERE job_id=?').run(JSON.stringify(plan),row.job_id);}
+    }
+    return this.getTask(id);
   }
 
   pauseForReason(id:string,reason:string):GuluConnectorTask {

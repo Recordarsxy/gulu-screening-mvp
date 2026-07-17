@@ -19,6 +19,7 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider() }: A
   const app = express(); const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
   const engine = new ScreeningEngine(db, deepSeek);
   const gulu = new GuluService(db);
+  const taskControllers=new Map<string,AbortController>();
   app.disable('x-powered-by'); app.use(express.json({ limit: '2mb' }));
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, host: '127.0.0.1', mode: 'local-only', version: '1.1.0' }));
@@ -41,10 +42,11 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider() }: A
     const taskId=String(req.params.taskId);
     const taskState=gulu.getTask(taskId);if(!['queued','running'].includes(taskState.status))return res.status(409).json({error:'task_not_running'});
     if(type==='candidate') {
-      const recorded=gulu.recordCandidate(taskId,eventId,req.body.snapshot);if(recorded.duplicateEvent)return res.json(recorded);
+      const recorded=gulu.recordCandidate(taskId,eventId,req.body.snapshot);
       const task=gulu.getTask(taskId);const snapshot=req.body.snapshot;
       const candidate={id:`${task.jobId}:gulu:${snapshot.guluId}`,jobId:task.jobId,dedupeKey:String(snapshot.guluId||snapshot.detailUrl),name:String(snapshot.name),guluId:String(snapshot.guluId),detailUrl:String(snapshot.detailUrl),currentCompany:String(snapshot.company??''),currentRole:String(snapshot.role??''),experiences:(snapshot.experiences??[]).map((item:Record<string,unknown>)=>({company:String(item.company??''),role:String(item.role??''),period:String(item.period??''),summary:String(item.summary??'')})),sourceRound:snapshot.sourceRound};
-      const assessed=await engine.assessCandidate(task.jobId,task.ruleVersion,candidate);return res.json(gulu.recordAnalysis(taskId,assessed.decision.inputTokens,assessed.decision.outputTokens));
+      const controller=new AbortController();taskControllers.set(taskId,controller);
+      try{const assessed=await engine.assessCandidate(task.jobId,task.ruleVersion,candidate,controller.signal);const latest=gulu.getTask(taskId);if(!['queued','running'].includes(latest.status))return res.status(409).json({error:'task_not_running'});return res.json(assessed.created?gulu.recordAnalysis(taskId,assessed.decision.inputTokens,assessed.decision.outputTokens):recorded);}finally{taskControllers.delete(taskId);}
     }
     if(type==='failure') return res.json(gulu.recordFailure(taskId,String(req.body?.error??'connector_failure')));
     if(type==='checkpoint') return res.json(gulu.updateCheckpoint(taskId,req.body.checkpoint??{}));
@@ -105,7 +107,7 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider() }: A
   }catch(error){next(error)}});
   app.put('/api/jobs/:jobId/gulu-plan/confirm',(req,res,next)=>{try{res.json(gulu.confirmPlan(req.params.jobId,req.body))}catch(error){next(error)}});
   app.get('/api/jobs/:jobId/gulu-plan',(req,res)=>{const plan=gulu.getPlan(req.params.jobId);if(!plan)return res.status(404).json({error:'gulu_plan_not_found'});res.json(plan)});
-  app.post('/api/jobs/:jobId/runs/gulu',(req,res,next)=>{try{const requested=String(req.body?.mode??'dry-run');const mode=requested==='pilot'||requested==='formal'?requested:'dry-run';res.status(201).json(gulu.startTask(String(req.params.jobId),mode))}catch(error){if(error instanceof Error&&error.message==='gulu_plan_not_confirmed')return res.status(409).json({error:error.message});next(error)}});
+  app.post('/api/jobs/:jobId/runs/gulu',(req,res,next)=>{try{const requested=String(req.body?.mode??'dry-run');const mode=requested==='pilot'||requested==='formal'?requested:'dry-run';res.status(201).json(gulu.startTask(String(req.params.jobId),mode))}catch(error){if(error instanceof Error&&['gulu_plan_not_confirmed','gulu_dry_run_required','gulu_pilot_required','gulu_task_already_active'].includes(error.message))return res.status(409).json({error:error.message});next(error)}});
 
   app.get('/api/jobs/:jobId/job-pack.json', (req, res) => {
     const pack = getCurrentVersion(db, req.params.jobId); if (!pack) return res.status(404).end();
@@ -135,9 +137,9 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider() }: A
       res.json(run);
     } catch (error) { next(error); }
   });
-  app.post('/api/runs/:runId/pause', (req, res, next) => { try { const task=db.prepare('SELECT 1 FROM gulu_tasks WHERE id=?').get(req.params.runId);res.json(task?gulu.setStatus(req.params.runId,'paused'):engine.pauseRun(req.params.runId)); } catch (error) { next(error); } });
+  app.post('/api/runs/:runId/pause', (req, res, next) => { try { const task=db.prepare('SELECT 1 FROM gulu_tasks WHERE id=?').get(req.params.runId);if(task)taskControllers.get(String(req.params.runId))?.abort();res.json(task?gulu.setStatus(req.params.runId,'paused'):engine.pauseRun(req.params.runId)); } catch (error) { next(error); } });
   app.post('/api/runs/:runId/resume', (req, res, next) => { try { const task=db.prepare('SELECT 1 FROM gulu_tasks WHERE id=?').get(req.params.runId);res.json(task?gulu.setStatus(req.params.runId,'running'):engine.resumeRun(req.params.runId)); } catch (error) { next(error); } });
-  app.post('/api/runs/:runId/stop', (req, res, next) => { try { res.json(gulu.setStatus(req.params.runId,'stopped')); } catch (error) { next(error); } });
+  app.post('/api/runs/:runId/stop', (req, res, next) => { try { taskControllers.get(String(req.params.runId))?.abort();res.json(gulu.setStatus(String(req.params.runId),'stopped')); } catch (error) { next(error); } });
 
   app.get('/api/jobs/:jobId/results', (req, res) => {
     const items = db.prepare(`SELECT c.id candidateId,c.name,c.gulu_id guluId,c.detail_url detailUrl,c.current_company currentCompany,
@@ -183,7 +185,7 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider() }: A
   });
 
   app.use((error: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-    const known = ['job_not_found','run_not_found','rule_version_not_found','document_has_no_extractable_text','unsafe_source_path','protected_attribute_rule','confirmation_required','candidate_not_in_job','pairing_code_invalid','gulu_plan_not_confirmed'];
+    const known = ['job_not_found','run_not_found','rule_version_not_found','document_has_no_extractable_text','unsafe_source_path','protected_attribute_rule','confirmation_required','candidate_not_in_job','pairing_code_invalid','gulu_plan_not_confirmed','task_aborted'];
     res.status(known.includes(error.message) ? 400 : 500).json({ error: error.message || 'internal_error' });
   });
   return app;

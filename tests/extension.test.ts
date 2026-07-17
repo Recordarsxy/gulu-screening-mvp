@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { readFile } from 'node:fs/promises';
 
 describe('Chrome extension safety boundary', () => {
+  it('uses stable event IDs and reconstructs list state after restart', async () => {
+    const source=await readFile(new URL('../extension/background.js',import.meta.url),'utf8');
+    expect(source).toContain('candidate:${task.id}:${task.currentRound}:${seed.guluId}');
+    expect(source).toContain('async function restoreList');
+    expect(source).toContain('for (let current = 1; current < page; current += 1)');
+  });
+
   it('uses Manifest V3 with no sensitive browser permissions', async () => {
     const manifest = JSON.parse(await readFile(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
     expect(manifest.manifest_version).toBe(3);

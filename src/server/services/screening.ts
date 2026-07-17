@@ -75,7 +75,7 @@ export class ScreeningEngine {
     return this.getRun(id);
   }
 
-  async assessCandidate(jobId:string,ruleVersion:number,candidate:Candidate):Promise<{candidateId:string;decision:Decision;created:boolean}> {
+  async assessCandidate(jobId:string,ruleVersion:number,candidate:Candidate,signal?:AbortSignal):Promise<{candidateId:string;decision:Decision;created:boolean}> {
     const pack=getVersion(this.db,jobId,ruleVersion);if(!pack)throw new Error('rule_version_unavailable');
     this.db.prepare(`INSERT INTO candidates
       (id,job_id,dedupe_key,name,gulu_id,detail_url,current_company,current_role,experiences_json,source_round,resume_hash)
@@ -85,7 +85,7 @@ export class ScreeningEngine {
     const existing=this.db.prepare('SELECT label,reason_code,evidence_json,model,input_tokens,output_tokens FROM assessments WHERE candidate_id=? AND rule_version=?').get(canonical.id,ruleVersion) as Record<string,unknown>|undefined;
     if(existing)return {candidateId:canonical.id,created:false,decision:{label:String(existing.label) as Decision['label'],reasonCode:String(existing.reason_code),evidence:JSON.parse(String(existing.evidence_json)),model:String(existing.model),inputTokens:Number(existing.input_tokens),outputTokens:Number(existing.output_tokens)}};
     let decision=classifyDeterministically(pack,candidate);
-    if(decision.label==='review'&&this.ai?.isConfigured()){try{decision=await this.ai.assessCandidate(pack,sanitizeCandidate(candidate));}catch{decision={label:'review',reasonCode:'AI_FALLBACK_REVIEW',evidence:['AI 分析不可用，已安全转人工复核'],model:'fallback',inputTokens:0,outputTokens:0};}}
+    if(decision.label==='review'&&this.ai?.isConfigured()){try{decision=await this.ai.assessCandidate(pack,sanitizeCandidate(candidate),signal);}catch{if(signal?.aborted)throw new Error('task_aborted');decision={label:'review',reasonCode:'AI_FALLBACK_REVIEW',evidence:['AI 分析不可用，已安全转人工复核'],model:'fallback',inputTokens:0,outputTokens:0};}}
     this.db.prepare(`INSERT INTO assessments(id,job_id,candidate_id,rule_version,label,reason_code,evidence_json,model,input_tokens,output_tokens) VALUES (?,?,?,?,?,?,?,?,?,?)`)
       .run(randomUUID(),jobId,canonical.id,ruleVersion,decision.label,decision.reasonCode,JSON.stringify(decision.evidence),decision.model,decision.inputTokens,decision.outputTokens);
     return {candidateId:canonical.id,decision,created:true};

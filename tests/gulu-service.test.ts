@@ -60,4 +60,18 @@ describe('Gulu service', () => {
     expect(service.setStatus(task.id,'stopped').status).toBe('stopped');
     expect(service.setStatus(task.id,'running').status).toBe('stopped');
   });
+
+  it('enforces dry-run then pilot before a formal run',()=>{
+    const {service}=setup();service.confirmPlan('job-1',draft);
+    expect(()=>service.startTask('job-1','pilot')).toThrow('gulu_dry_run_required');
+    const dry=service.startTask('job-1','dry-run');service.setStatus(dry.id,'running');service.setStatus(dry.id,'completed');
+    expect(()=>service.startTask('job-1','formal')).toThrow('gulu_pilot_required');
+    const pilot=service.startTask('job-1','pilot');service.setStatus(pilot.id,'running');service.setStatus(pilot.id,'completed');
+    expect(service.startTask('job-1','formal').mode).toBe('formal');
+  });
+
+  it('allows only one active connector task per job',()=>{
+    const {service}=setup();service.confirmPlan('job-1',draft);service.startTask('job-1','dry-run');
+    expect(()=>service.startTask('job-1','dry-run')).toThrow('gulu_task_already_active');
+  });
 });
