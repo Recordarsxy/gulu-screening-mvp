@@ -108,7 +108,13 @@ async function restoreList(tabId, round, page, submit) {
 }
 
 async function runOnce() {
-  if (active) return;
+  if (active) {
+    await api('/api/connector/gulu/heartbeat', {
+      method: 'POST',
+      body: JSON.stringify({ status: 'online', busy: true }),
+    }).catch(() => {});
+    return;
+  }
   active = true;
   let currentTask = null;
   try {

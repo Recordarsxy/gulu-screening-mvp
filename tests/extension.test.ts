@@ -18,6 +18,12 @@ describe('Chrome extension safety boundary', () => {
     expect(source).toContain('adapterPromise');
   });
 
+  it('keeps heartbeats alive while a long connector operation is active',async()=>{
+    const source=await readFile(new URL('../extension/background.js',import.meta.url),'utf8');
+    expect(source).toContain("if (active) {");
+    expect(source).toContain("status: 'online', busy: true");
+  });
+
   it('uses Manifest V3 with no sensitive browser permissions', async () => {
     const manifest = JSON.parse(await readFile(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
     expect(manifest.manifest_version).toBe(3);
