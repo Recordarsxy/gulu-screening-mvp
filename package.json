@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently \"tsx watch src/server/index.ts\" \"vite\"",
-    "build": "vite build && tsc -p tsconfig.server.json",
+    "build": "vite build --configLoader runner && tsc -p tsconfig.server.json",
     "start": "node dist-server/server/index.js",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "vitest run --configLoader runner --config vitest.config.mts",
+    "test:watch": "vitest --configLoader runner --config vitest.config.mts",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
     "lint": "eslint .",
     "verify": "npm run typecheck && npm test && npm run build"
@@ -19,7 +19,6 @@
     "express": "^5.1.0",
     "mammoth": "^1.10.0",
     "multer": "^2.0.2",
-    "openai": "^5.12.2",
     "pdf-parse": "^2.4.5",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",

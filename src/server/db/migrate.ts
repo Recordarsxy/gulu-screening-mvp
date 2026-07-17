@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 
 export function migrate(db: DatabaseSync): void {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE IF NOT EXISTS jobs (
       id TEXT PRIMARY KEY, title TEXT NOT NULL, source_text TEXT NOT NULL,
       source_hash TEXT, source_path TEXT, current_rule_version INTEGER NOT NULL DEFAULT 0,
@@ -55,4 +56,14 @@ export function migrate(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS idx_assessments_job_label ON assessments(job_id, label);
     CREATE INDEX IF NOT EXISTS idx_runs_job ON runs(job_id);
   `);
+  db.prepare('INSERT OR IGNORE INTO schema_migrations(version) VALUES (?)').run(1);
+  const version2 = db.prepare('SELECT 1 ok FROM schema_migrations WHERE version=2').get();
+  if (!version2) {
+    db.exec('BEGIN');
+    try {
+      const runColumns = db.prepare('PRAGMA table_info(runs)').all() as Array<{name:string}>;
+      if (!runColumns.some((column) => column.name === 'input_json')) db.exec("ALTER TABLE runs ADD COLUMN input_json TEXT NOT NULL DEFAULT '[]'");
+      db.prepare('INSERT INTO schema_migrations(version) VALUES (2)').run(); db.exec('COMMIT');
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+  }
 }

@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "谷露筛选只读连接器（未配置）",
+  "version": "1.0.0",
+  "description": "仅连接本机谷露筛选 MVP。真实谷露适配器配置前不会读取任何招聘页面。",
+  "permissions": [],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "谷露筛选连接器：未配置" }
+}

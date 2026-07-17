@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assertNoSensitiveText, sanitizeCandidate } from '../src/server/services/redaction.js';
+import { assertNoSensitiveText, sanitizeCandidate, sanitizeTextForCloud } from '../src/server/services/redaction.js';
 
 describe('candidate redaction', () => {
   it('removes identity fields and sensitive text before cloud use', () => {
@@ -14,5 +14,16 @@ describe('candidate redaction', () => {
     }
     expect(safe.experiences[0].company).toBe('甲公司');
     expect(() => assertNoSensitiveText(safe)).not.toThrow();
+  });
+
+  it('detects formatted phone numbers, WeChat IDs, and addresses', () => {
+    for (const value of ['+86 138-1234-5678','微信: abc_123','地址: 上海市浦东新区世纪大道']) {
+      expect(() => assertNoSensitiveText({ value })).toThrowError('sensitive_data_detected');
+    }
+  });
+
+  it('redacts contact details from JD text before DeepSeek job analysis',()=>{
+    const safe=sanitizeTextForCloud('销售经理，联系人电话 +86 138-1234-5678，微信: hiring_01');
+    expect(safe).not.toContain('138-1234-5678');expect(safe).not.toContain('hiring_01');
   });
 });

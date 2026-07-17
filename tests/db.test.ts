@@ -11,7 +11,7 @@ describe('SQLite model', () => {
     const db = openDatabase(':memory:'); databases.push(db);
     migrate(db);
     const names = (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{name:string}>).map((r) => r.name);
-    expect(names).toEqual(expect.arrayContaining(['jobs','job_rule_versions','search_tasks','runs','candidates','assessments','human_reviews','audit_events']));
+    expect(names).toEqual(expect.arrayContaining(['schema_migrations','jobs','job_rule_versions','search_tasks','runs','candidates','assessments','human_reviews','audit_events']));
   });
 
   it('deletes dependent candidates and assessments with a job', () => {
@@ -23,5 +23,13 @@ describe('SQLite model', () => {
     repos.jobs.delete('job-1');
     expect(db.prepare('SELECT count(*) AS count FROM candidates').get()).toEqual({ count: 0 });
     expect(db.prepare('SELECT count(*) AS count FROM assessments').get()).toEqual({ count: 0 });
+  });
+
+  it('upgrades an existing runs table without losing it', () => {
+    const db = openDatabase(':memory:'); databases.push(db);
+    db.exec(`CREATE TABLE runs (id TEXT PRIMARY KEY,job_id TEXT,rule_version INTEGER,status TEXT,cursor INTEGER DEFAULT 0,total INTEGER DEFAULT 0,input_tokens INTEGER DEFAULT 0,output_tokens INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP)`);
+    migrate(db);
+    const columns = db.prepare('PRAGMA table_info(runs)').all() as Array<{name:string}>;
+    expect(columns.map((column)=>column.name)).toContain('input_json');
   });
 });

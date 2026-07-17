@@ -38,7 +38,7 @@ function section(title: string, values: string[] | string): Paragraph[] {
 export async function generateHumanGuide(pack: JobPack): Promise<Buffer> {
   const children = [
     new Paragraph({ text: '岗位筛选说明', heading: HeadingLevel.TITLE }),
-    new Paragraph(`岗位 ID：${pack.job_id}　规则版本：${pack.rule_version}　状态：${pack.approval.status === 'approved' ? '已批准' : '草稿'}`),
+    new Paragraph(`岗位 ID：${pack.job_id} | 规则版本：${pack.rule_version} | 状态：${pack.approval.status === 'approved' ? '已批准' : '草稿'}`),
     ...section('三十秒理解岗位', pack.summary),
     ...section('客户真正想找的人', pack.ideal_candidate),
     ...section('明确必须项', pack.constraints.hard),

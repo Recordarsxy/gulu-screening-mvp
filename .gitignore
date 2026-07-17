@@ -1,6 +1,7 @@
 .worktrees/
 node_modules/
 dist/
+dist-server/
 data/
 uploads/
 exports/
@@ -8,3 +9,4 @@ exports/
 playwright-report/
 test-results/
 coverage/
+tmp/

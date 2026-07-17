@@ -8,7 +8,7 @@ export type SafeCandidate = {
 
 const sensitivePatterns: RegExp[] = [
   /https?:\/\/\S+/gi,
-  /\b1[3-9]\d{9}\b/g,
+  /(?:\+?86[\s-]?)?1[3-9](?:[\s-]?\d){9}\b/g,
   /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,
   /\b\d{17}[0-9Xx]\b/g,
   /(?:微信|wechat|wx)[：:\s_-]*[a-zA-Z0-9_-]+/gi,
@@ -22,6 +22,12 @@ function scrub(text: string, knownValues: string[]): string {
   }
   for (const pattern of sensitivePatterns) result = result.replace(pattern, '[已脱敏]');
   return result.replace(/\[已脱敏\](?:[，,]\s*\[已脱敏\])+/g, '[已脱敏]');
+}
+
+export function sanitizeTextForCloud(text: string): string {
+  const safe = scrub(text, []);
+  assertNoSensitiveText(safe);
+  return safe;
 }
 
 export function sanitizeCandidate(candidate: Candidate): SafeCandidate {
@@ -44,9 +50,11 @@ export function assertNoSensitiveText(payload: unknown): void {
   const serialized = JSON.stringify(payload);
   const forbidden = [
     /https?:\/\//i,
-    /\b1[3-9]\d{9}\b/,
+    /(?:\+?86[\s-]?)?1[3-9](?:[\s-]?\d){9}\b/,
     /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i,
     /\b\d{17}[0-9Xx]\b/,
+    /(?:微信|wechat|wx)[：:\s_-]*[a-zA-Z0-9_-]+/i,
+    /(?:住址|地址)[：:]?[^，。；\n]+/,
   ];
   if (forbidden.some((pattern) => pattern.test(serialized))) throw new Error('sensitive_data_detected');
 }

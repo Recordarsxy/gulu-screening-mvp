@@ -1,6 +1,14 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { JobPackSchema, type JobPack } from '../../shared/contracts.js';
 
+export function validateRulePolicy(pack: JobPack): void {
+  const decisive = [...pack.constraints.hard, ...pack.evidence.required, ...pack.evidence.negative, ...pack.roles.exact, ...pack.roles.synonyms, ...pack.roles.excluded, ...pack.industries.excluded];
+  const protectedPattern = /年龄|周岁|\d+\s*岁|性别|男性|女性|婚育|婚姻|已婚|未婚|生育|gender|(^|[^a-zA-Z])(?:男|女)(?=$|[^a-zA-Z])/i;
+  if (decisive.some((rule) => protectedPattern.test(rule))) throw new Error('protected_attribute_rule');
+  const confirmationPattern = /学历|本科|硕士|博士|城市|地区|\d+\s*年(?:经验|以上)/;
+  if (decisive.some((rule) => confirmationPattern.test(rule) && !rule.startsWith('[已确认]'))) throw new Error('confirmation_required');
+}
+
 export function makeDefaultJobPack(jobId: string, title: string, sourceText: string): JobPack {
   return JobPackSchema.parse({
     job_id: jobId,
@@ -19,8 +27,9 @@ export function makeDefaultJobPack(jobId: string, title: string, sourceText: str
   });
 }
 
-export function createDraft(db: DatabaseSync, input: { jobId: string; title: string; sourceText: string }): JobPack {
-  const pack = makeDefaultJobPack(input.jobId, input.title, input.sourceText);
+export function createDraft(db: DatabaseSync, input: { jobId: string; title: string; sourceText: string; pack?: JobPack }): JobPack {
+  const pack = input.pack ? JobPackSchema.parse({...input.pack,job_id:input.jobId,rule_version:1,approval:{status:'draft',approved_at:null}}) : makeDefaultJobPack(input.jobId, input.title, input.sourceText);
+  validateRulePolicy(pack);
   db.exec('BEGIN');
   try {
     db.prepare('INSERT INTO jobs (id,title,source_text,current_rule_version) VALUES (?,?,?,1)')
@@ -54,6 +63,7 @@ export function reviseDraft(db: DatabaseSync, jobId: string, patch: Partial<JobP
     rule_version: current.rule_version + 1,
     approval: { status: 'draft', approved_at: null },
   });
+  validateRulePolicy(next);
   db.exec('BEGIN');
   try {
     db.prepare('INSERT INTO job_rule_versions (job_id,version,pack_json,status) VALUES (?,?,?,?)')
@@ -66,6 +76,7 @@ export function reviseDraft(db: DatabaseSync, jobId: string, patch: Partial<JobP
 export function approveVersion(db: DatabaseSync, jobId: string, version: number): JobPack {
   const pack = getVersion(db, jobId, version);
   if (!pack) throw new Error('rule_version_not_found');
+  validateRulePolicy(pack);
   const approved = JobPackSchema.parse({ ...pack, approval: { status: 'approved', approved_at: new Date().toISOString() } });
   db.prepare('UPDATE job_rule_versions SET pack_json=?, status=?, approved_at=? WHERE job_id=? AND version=?')
     .run(JSON.stringify(approved), 'approved', approved.approval.approved_at, jobId, version);

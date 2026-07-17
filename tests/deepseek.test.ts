@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DeepSeekError, DeepSeekProvider } from '../src/server/services/deepseek.js';
+import { makeDefaultJobPack } from '../src/server/services/job-pack.js';
 
 describe('DeepSeek provider', () => {
   it('requests JSON output with configurable model and parses usage', async () => {
@@ -27,5 +28,34 @@ describe('DeepSeek provider', () => {
     const result = await provider.testConnection();
     expect(result).toMatchObject({ ok: false, keyPresent: false, errorType: 'missing_api_key' });
     expect(DeepSeekError).toBeDefined();
+  });
+
+  it('rejects an untrusted host before sending the API key', async () => {
+    let called = false;
+    const provider = new DeepSeekProvider({ apiKey: 'secret', baseUrl: 'https://evil.test', fetcher: async () => { called = true; return new Response(); } });
+    await expect(provider.generateJson('输出 json', {})).rejects.toMatchObject({ code: 'untrusted_api_host' });
+    expect(called).toBe(false);
+  });
+
+  it('never allows AI alone to exclude a candidate', async () => {
+    const fetcher: typeof fetch = async () => new Response(JSON.stringify({ choices:[{message:{content:'{"label":"exclude","reasonCode":"MISSING","evidence":["信息缺失"]}'}}] }), {status:200});
+    const provider = new DeepSeekProvider({ apiKey:'test', fetcher });
+    const result = await provider.assessCandidate({
+      job_id:'j',rule_version:1,approval:{status:'approved',approved_at:'now'},constraints:{hard:[],soft:[],ignore:[]},industries:{target:[],adjacent:[],excluded:[]},companies:{target:[]},roles:{exact:[],synonyms:[],adjacent:[],excluded:[]},evidence:{required:[],transferable:[],negative:[]},search_plan:[],decision_policy:{labels:['recommend','review','exclude'],missing_information:'review'},questions:[],summary:'',ideal_candidate:''
+    }, {currentCompany:'甲',currentRole:'销售',experiences:[]});
+    expect(result).toMatchObject({label:'review',reasonCode:'AI_EXCLUSION_REQUIRES_RULE_EVIDENCE'});
+  });
+
+  it('normalizes a single evidence string returned by DeepSeek', async () => {
+    const fetcher:typeof fetch=async()=>new Response(JSON.stringify({choices:[{message:{content:'{"label":"review","reasonCode":"AI_REVIEW","evidence":"需要人工确认"}'}}]}),{status:200});
+    const provider=new DeepSeekProvider({apiKey:'test',fetcher});
+    const result=await provider.assessCandidate({job_id:'j',rule_version:1,approval:{status:'approved',approved_at:'now'},constraints:{hard:[],soft:[],ignore:[]},industries:{target:[],adjacent:[],excluded:[]},companies:{target:[]},roles:{exact:[],synonyms:[],adjacent:[],excluded:[]},evidence:{required:[],transferable:[],negative:[]},search_plan:[],decision_policy:{labels:['recommend','review','exclude'],missing_information:'review'},questions:[],summary:'',ideal_candidate:''},{currentCompany:'甲',currentRole:'销售',experiences:[]});
+    expect(result.evidence).toEqual(['需要人工确认']);
+  });
+
+  it('unwraps and safely completes a partial DeepSeek job pack',async()=>{
+    const fetcher:typeof fetch=async()=>new Response(JSON.stringify({choices:[{message:{content:'{"job_pack":{"summary":"AI 摘要","search_plan":["公司轮：目标公司"]}}'}}]}),{status:200});
+    const base=makeDefaultJobPack('job-ai','销售经理','JD');const pack=await new DeepSeekProvider({apiKey:'test',fetcher}).generateJobPack(base,'JD');
+    expect(pack).toMatchObject({job_id:'job-ai',summary:'AI 摘要',search_plan:['公司轮：目标公司'],approval:{status:'draft'}});expect(pack.constraints).toEqual(base.constraints);
   });
 });

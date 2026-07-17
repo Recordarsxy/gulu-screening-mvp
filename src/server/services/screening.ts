@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Assessment, Candidate, JobPack } from '../../shared/contracts.js';
-import { getCurrentVersion } from './job-pack.js';
+import { getCurrentVersion, getVersion } from './job-pack.js';
+import { sanitizeCandidate } from './redaction.js';
+import type { DeepSeekProvider } from './deepseek.js';
 
 export type Decision = Pick<Assessment, 'label' | 'reasonCode' | 'evidence' | 'model' | 'inputTokens' | 'outputTokens'>;
 
@@ -44,7 +46,7 @@ export function buildCacheKey(rule: unknown, resume: unknown): string {
 export type RunRecord = { id: string; jobId: string; ruleVersion: number; status: 'running'|'paused'|'completed'|'failed'; cursor: number; total: number; inputTokens: number; outputTokens: number };
 
 export class ScreeningEngine {
-  constructor(private readonly db: DatabaseSync) {}
+  constructor(private readonly db: DatabaseSync, private readonly ai?: DeepSeekProvider) {}
 
   startRun(jobId: string, rounds: Candidate[][]): RunRecord {
     const pack = getCurrentVersion(this.db, jobId);
@@ -82,20 +84,28 @@ export class ScreeningEngine {
     const stored = this.db.prepare('SELECT input_json FROM runs WHERE id=?').get(id) as { input_json: string };
     const inputs = JSON.parse(stored.input_json) as Candidate[];
     const candidate = inputs[run.cursor];
-    const pack = getCurrentVersion(this.db, run.jobId);
-    if (!pack || pack.rule_version !== run.ruleVersion) throw new Error('rule_version_unavailable');
+    const pack = getVersion(this.db, run.jobId, run.ruleVersion);
+    if (!pack) throw new Error('rule_version_unavailable');
     this.db.prepare(`INSERT INTO candidates
       (id,job_id,dedupe_key,name,gulu_id,detail_url,current_company,current_role,experiences_json,source_round,resume_hash)
       VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(job_id,dedupe_key) DO NOTHING`)
       .run(candidate.id,candidate.jobId,candidate.dedupeKey,candidate.name,candidate.guluId ?? null,candidate.detailUrl ?? null,candidate.currentCompany,candidate.currentRole,JSON.stringify(candidate.experiences),candidate.sourceRound,buildCacheKey({},candidate.experiences));
-    const existing = this.db.prepare('SELECT id FROM assessments WHERE candidate_id=? AND rule_version=?').get(candidate.id, run.ruleVersion);
+    const canonical = this.db.prepare('SELECT id FROM candidates WHERE job_id=? AND dedupe_key=?').get(run.jobId,candidate.dedupeKey) as {id:string};
+    const candidateId = canonical.id;
+    const existing = this.db.prepare('SELECT id FROM assessments WHERE candidate_id=? AND rule_version=?').get(candidateId, run.ruleVersion);
     if (!existing) {
-      const decision = classifyDeterministically(pack, candidate);
+      let decision = classifyDeterministically(pack, candidate);
+      if (decision.label === 'review' && this.ai?.isConfigured()) {
+        try { decision = await this.ai.assessCandidate(pack, sanitizeCandidate(candidate)); }
+        catch { decision = { label:'review', reasonCode:'AI_FALLBACK_REVIEW', evidence:['AI 分析不可用，已安全转人工复核'], model:'fallback', inputTokens:0, outputTokens:0 }; }
+      }
       this.db.prepare(`INSERT INTO assessments
         (id,job_id,candidate_id,rule_version,label,reason_code,evidence_json,model,input_tokens,output_tokens)
         VALUES (?,?,?,?,?,?,?,?,?,?)`)
-        .run(randomUUID(),run.jobId,candidate.id,run.ruleVersion,decision.label,decision.reasonCode,JSON.stringify(decision.evidence),decision.model,decision.inputTokens,decision.outputTokens);
+        .run(randomUUID(),run.jobId,candidateId,run.ruleVersion,decision.label,decision.reasonCode,JSON.stringify(decision.evidence),decision.model,decision.inputTokens,decision.outputTokens);
+      this.db.prepare('UPDATE runs SET input_tokens=input_tokens+?,output_tokens=output_tokens+? WHERE id=?').run(decision.inputTokens,decision.outputTokens,id);
     }
+    if (this.getRun(id).status !== 'running') return this.getRun(id);
     const nextCursor = run.cursor + 1;
     this.db.prepare('UPDATE runs SET cursor=?, status=? WHERE id=?').run(nextCursor, nextCursor >= run.total ? 'completed' : 'running', id);
     return this.getRun(id);
