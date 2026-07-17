@@ -1,6 +1,6 @@
 import { assertNoSensitiveText } from './redaction.js';
 import { z } from 'zod';
-import { JobPackSchema, type JobPack } from '../../shared/contracts.js';
+import { GuluSearchPlanSchema, JobPackSchema, type GuluSearchPlan, type JobPack } from '../../shared/contracts.js';
 import type { SafeCandidate } from './redaction.js';
 
 export type DeepSeekUsage = { inputTokens: number; outputTokens: number };
@@ -110,6 +110,20 @@ export class DeepSeekProvider {
       approval: { status:'draft',approved_at:null },
       decision_policy: {labels:['recommend','review','exclude'],missing_information:'review'},
     });
+  }
+
+  async generateGuluSearchPlan(pack: JobPack): Promise<DeepSeekResult<GuluSearchPlan>> {
+    const result=await this.generateJson<{rounds?:Array<Record<string,unknown>>}>('根据已批准岗位规则生成谷露两轮结构化搜索条件。第一轮必须是 company，第二轮必须是 role。只输出 rounds JSON；筛选字段仅可使用 keywords、companies、roles、cities、industries、functions。',{
+      rules:{constraints:pack.constraints,industries:pack.industries,companies:pack.companies,roles:pack.roles,evidence:pack.evidence},
+    });
+    const rounds=(result.data.rounds??[]).map((round,index)=>({
+      ...round,kind:index===0?'company':'role',limit:Math.min(50,Math.max(1,Number(round.limit)||50)),filters:{
+        keywords:[],companies:[],roles:[],cities:[],industries:[],functions:[],
+        ...((round.filters && typeof round.filters==='object')?round.filters:{}),
+      },
+    }));
+    const data=GuluSearchPlanSchema.parse({jobId:pack.job_id,ruleVersion:pack.rule_version,status:'draft',confirmedAt:null,rounds});
+    return {data,usage:result.usage,model:result.model};
   }
 
   async testConnection(): Promise<ConnectionResult> {

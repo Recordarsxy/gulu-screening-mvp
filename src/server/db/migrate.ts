@@ -66,4 +66,41 @@ export function migrate(db: DatabaseSync): void {
       db.prepare('INSERT INTO schema_migrations(version) VALUES (2)').run(); db.exec('COMMIT');
     } catch (error) { db.exec('ROLLBACK'); throw error; }
   }
+  const version3 = db.prepare('SELECT 1 ok FROM schema_migrations WHERE version=3').get();
+  if (!version3) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS gulu_search_plans (
+        job_id TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+        rule_version INTEGER NOT NULL, status TEXT NOT NULL, plan_json TEXT NOT NULL,
+        confirmed_at TEXT, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS gulu_connector (
+        singleton INTEGER PRIMARY KEY CHECK(singleton=1), pairing_code_hash TEXT,
+        pairing_expires_at TEXT, token_hash TEXT, paired_at TEXT, last_seen_at TEXT,
+        extension_version TEXT, gulu_status TEXT NOT NULL DEFAULT 'unpaired', last_error TEXT
+      );
+      INSERT OR IGNORE INTO gulu_connector(singleton) VALUES (1);
+      CREATE TABLE IF NOT EXISTS gulu_tasks (
+        id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+        rule_version INTEGER NOT NULL, status TEXT NOT NULL, mode TEXT NOT NULL DEFAULT 'dry-run', current_round TEXT NOT NULL DEFAULT 'company',
+        page INTEGER NOT NULL DEFAULT 1, candidate_cursor INTEGER NOT NULL DEFAULT 0,
+        read_count INTEGER NOT NULL DEFAULT 0, round_read_count INTEGER NOT NULL DEFAULT 0, deduped_count INTEGER NOT NULL DEFAULT 0,
+        analyzed_count INTEGER NOT NULL DEFAULT 0, input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0, consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS gulu_task_events (
+        event_id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES gulu_tasks(id) ON DELETE CASCADE,
+        event_type TEXT NOT NULL, payload_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS gulu_snapshots (
+        task_id TEXT NOT NULL REFERENCES gulu_tasks(id) ON DELETE CASCADE,
+        dedupe_key TEXT NOT NULL, content_hash TEXT NOT NULL, snapshot_json TEXT NOT NULL, first_round TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(task_id,dedupe_key), UNIQUE(task_id,content_hash)
+      );
+      CREATE INDEX IF NOT EXISTS idx_gulu_tasks_job ON gulu_tasks(job_id);
+    `);
+    db.prepare('INSERT INTO schema_migrations(version) VALUES (3)').run();
+  }
 }

@@ -1,10 +1,23 @@
-import { guluAdapter } from './gulu-adapter.js';
-
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type === 'status') {
-    sendResponse({ enabled: guluAdapter.enabled, reason: 'adapter_not_configured' });
-    return false;
-  }
-  sendResponse({ ok: false, error: 'adapter_not_configured' });
-  return false;
-});
+const SERVICE='http://127.0.0.1:4318'; const GULU='http://121.43.105.7/crm#candidate/list'; let active=false;
+const delay=(ms)=>new Promise((resolve)=>setTimeout(resolve,ms)); const pace=()=>delay(800+Math.floor(Math.random()*701));
+async function stored(){return chrome.storage.local.get(['connectorToken','guluTabId']);}
+async function api(path,init={}){const {connectorToken}=await stored();const response=await fetch(`${SERVICE}${path}`,{...init,headers:{'content-type':'application/json',authorization:connectorToken?`Bearer ${connectorToken}`:'',...init.headers}});const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error??`local_service_${response.status}`);return data;}
+async function send(tabId,operation,args={}){const response=await chrome.tabs.sendMessage(tabId,{operation,args});if(!response?.ok)throw new Error(response?.error??'adapter_unavailable');return response.result;}
+async function waitReady(tabId){for(let i=0;i<30;i+=1){await delay(500);try{return await send(tabId,'inspectState');}catch{}}throw new Error('gulu_tab_unavailable');}
+async function ensureTab(){const saved=await stored();if(saved.guluTabId){try{const tab=await chrome.tabs.get(saved.guluTabId);if(tab)return tab;}catch{}}
+  const found=await chrome.tabs.query({url:'http://121.43.105.7/*'});const tab=found[0]??await chrome.tabs.create({url:GULU,active:false});await chrome.storage.local.set({guluTabId:tab.id});return tab;
+}
+async function event(taskId,type,payload={}){return api(`/api/connector/gulu/tasks/${taskId}/events`,{method:'POST',body:JSON.stringify({eventId:crypto.randomUUID(),type,...payload})});}
+async function runOnce(){if(active)return;active=true;try{
+  const next=await api('/api/connector/gulu/tasks/next');await api('/api/connector/gulu/heartbeat',{method:'POST',body:JSON.stringify({status:'online'})});if(!next.task)return;const {task,plan}=next;const tab=await ensureTab();let state=await waitReady(tab.id);
+  if(task.status==='queued')await event(task.id,'checkpoint',{checkpoint:{status:'running'}});
+  if(state.state==='login_required'||state.state==='captcha'){await event(task.id,'needs_attention',{error:state.state});return;}
+  const round=plan.rounds.find((item)=>item.kind===task.currentRound);if(!round)throw new Error('search_round_missing');
+  if(task.candidateCursor===0&&task.page===1){if(state.state!=='list'){await chrome.tabs.update(tab.id,{url:GULU});state=await waitReady(tab.id);}await send(tab.id,'applyFilters',{filters:round.filters,submit:task.mode!=='dry-run'});if(task.mode==='dry-run'){if(task.currentRound==='company')await event(task.id,'checkpoint',{checkpoint:{currentRound:'role',page:1,candidateCursor:0}});else await event(task.id,'completed');return;}await delay(1500);}
+  const list=await send(tab.id,'readList',{page:task.page});const cap=task.mode==='pilot'?5:round.limit;let cursor=task.candidateCursor;let roundRead=task.roundReadCount;
+  while(cursor<list.length&&roundRead<cap){const seed=list[cursor];const detail=await chrome.tabs.create({url:seed.detailUrl,active:false});try{const detailState=await waitReady(detail.id);if(detailState.state!=='detail')throw new Error(detailState.state);const snapshot=await send(detail.id,'readDetail',{seed,sourceRound:task.currentRound,page:task.page});await event(task.id,'candidate',{snapshot});roundRead+=1;}catch(error){await pace();try{const snapshot=await send(detail.id,'readDetail',{seed,sourceRound:task.currentRound,page:task.page});await event(task.id,'candidate',{snapshot});roundRead+=1;}catch{const failure=await event(task.id,'failure',{error:String(error?.message??error)});if(failure.status==='needs_attention')return;}}finally{await chrome.tabs.remove(detail.id).catch(()=>{});}cursor+=1;await event(task.id,'checkpoint',{checkpoint:{candidateCursor:cursor}});await pace();}
+  if(roundRead>=cap||list.length===0){if(task.currentRound==='company'&&task.mode!=='pilot'){await event(task.id,'checkpoint',{checkpoint:{currentRound:'role',page:1,candidateCursor:0}});await chrome.tabs.update(tab.id,{url:GULU});}else await event(task.id,'completed');return;}
+  if(await send(tab.id,'nextPage')){await event(task.id,'checkpoint',{checkpoint:{page:task.page+1,candidateCursor:0}});}else if(task.currentRound==='company'){await event(task.id,'checkpoint',{checkpoint:{currentRound:'role',page:1,candidateCursor:0}});await chrome.tabs.update(tab.id,{url:GULU});}else await event(task.id,'completed');
+ }catch(error){await api('/api/connector/gulu/heartbeat',{method:'POST',body:JSON.stringify({status:'error',error:String(error?.message??error)})}).catch(()=>{});}finally{active=false;}}
+chrome.runtime.onInstalled.addListener(()=>chrome.alarms.create('gulu-poll',{periodInMinutes:0.5}));chrome.alarms.onAlarm.addListener(()=>runOnce());chrome.runtime.onStartup.addListener(()=>runOnce());
+chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{(async()=>{if(message?.type==='pair'){const result=await fetch(`${SERVICE}/api/connector/gulu/pairing/redeem`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:String(message.code),extensionVersion:chrome.runtime.getManifest().version})}).then(async(r)=>{const data=await r.json();if(!r.ok)throw new Error(data.error);return data});await chrome.storage.local.set({connectorToken:result.token});runOnce();return {ok:true};}if(message?.type==='status'){const values=await stored();return {ok:true,paired:Boolean(values.connectorToken)};}if(message?.type==='poll'){runOnce();return {ok:true};}return {ok:false,error:'unsupported_message'};})().then(sendResponse).catch((error)=>sendResponse({ok:false,error:String(error.message??error)}));return true;});
