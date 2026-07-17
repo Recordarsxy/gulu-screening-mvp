@@ -31,6 +31,13 @@ describe('Chrome extension safety boundary', () => {
     expect(source).toContain('minimumDelay: 2500');
   });
 
+  it('reloads the neutral candidate list before applying each search plan',async()=>{
+    const source=await readFile(new URL('../extension/background.js',import.meta.url),'utf8');
+    expect(source).toContain("await chrome.tabs.update(tabId, { url: GULU });");
+    expect(source).toContain('await chrome.tabs.reload(tabId);');
+    expect(source.indexOf('await chrome.tabs.reload(tabId);')).toBeLessThan(source.indexOf("await send(tabId, 'applyFilters'"));
+  });
+
   it('uses Manifest V3 with no sensitive browser permissions', async () => {
     const manifest = JSON.parse(await readFile(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
     expect(manifest.manifest_version).toBe(3);

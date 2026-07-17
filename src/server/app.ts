@@ -149,7 +149,8 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider() }: A
     const items = db.prepare(`SELECT c.id candidateId,c.name,c.gulu_id guluId,c.detail_url detailUrl,c.current_company currentCompany,
       c.current_role currentRole,c.source_round sourceRound,a.label,a.reason_code reasonCode,a.evidence_json evidence,
       a.rule_version ruleVersion,a.assessed_at assessedAt,COALESCE(h.status,'未审核') reviewStatus,COALESCE(h.note,'') note
-      FROM candidates c JOIN assessments a ON a.candidate_id=c.id
+      FROM candidates c JOIN jobs j ON j.id=c.job_id
+      JOIN assessments a ON a.candidate_id=c.id AND a.rule_version=j.current_rule_version
       LEFT JOIN human_reviews h ON h.candidate_id=c.id AND h.rule_version=a.rule_version
       WHERE c.job_id=? ORDER BY CASE a.label WHEN 'recommend' THEN 1 WHEN 'review' THEN 2 ELSE 3 END,c.name`).all(req.params.jobId)
       .map((row: any) => ({ ...row, evidence: JSON.parse(row.evidence) }));
