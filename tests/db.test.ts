@@ -49,4 +49,11 @@ describe('SQLite model', () => {
     const columns = (db.prepare('PRAGMA table_info(gulu_task_candidates)').all() as Array<{name:string}>).map((row) => row.name);
     expect(columns).toEqual(expect.arrayContaining(['task_id','candidate_id','created_at']));
   });
+
+  it('adds recoverable job archiving in schema version 6',()=>{
+    const db=openDatabase(':memory:');databases.push(db);migrate(db);
+    expect(db.prepare('SELECT 1 ok FROM schema_migrations WHERE version=6').get()).toEqual({ok:1});
+    const columns=(db.prepare('PRAGMA table_info(jobs)').all() as Array<{name:string}>).map(row=>row.name);
+    expect(columns).toContain('archived_at');
+  });
 });

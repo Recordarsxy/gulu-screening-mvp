@@ -165,4 +165,13 @@ export function migrate(db: DatabaseSync): void {
       db.prepare('INSERT INTO schema_migrations(version) VALUES (5)').run(); db.exec('COMMIT');
     } catch (error) { db.exec('ROLLBACK'); throw error; }
   }
+  const version6 = db.prepare('SELECT 1 ok FROM schema_migrations WHERE version=6').get();
+  if (!version6) {
+    db.exec('BEGIN');
+    try {
+      const jobColumns=db.prepare('PRAGMA table_info(jobs)').all() as Array<{name:string}>;
+      if(!jobColumns.some(column=>column.name==='archived_at'))db.exec('ALTER TABLE jobs ADD COLUMN archived_at TEXT');
+      db.prepare('INSERT INTO schema_migrations(version) VALUES (6)').run();db.exec('COMMIT');
+    } catch(error){db.exec('ROLLBACK');throw error;}
+  }
 }

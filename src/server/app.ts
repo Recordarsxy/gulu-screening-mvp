@@ -13,6 +13,7 @@ import { DeepSeekProvider } from './services/deepseek.js';
 import { sanitizeTextForCloud } from './services/redaction.js';
 import { GuluService } from './services/gulu.js';
 import { JobChangeService } from './services/job-changes.js';
+import { archiveJob, restoreJob } from './services/job-archive.js';
 
 type AppDeps = { db: DatabaseSync; dataRoot: string; deepSeek?: DeepSeekProvider; jobPackTimeoutMs?:number };
 
@@ -77,11 +78,21 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
     return res.status(400).json({error:'unsupported_connector_event'});
   }catch(error){next(error)}});
 
-  app.get('/api/jobs', (_req, res) => {
-    const jobs = db.prepare(`SELECT j.id,j.title,j.current_rule_version,j.created_at,v.status
-      FROM jobs j LEFT JOIN job_rule_versions v ON v.job_id=j.id AND v.version=j.current_rule_version ORDER BY j.created_at DESC`).all();
+  app.get('/api/jobs', (req, res) => {
+    const archiveFilter=req.query.archived==='true'?'IS NOT NULL':'IS NULL';
+    const jobs = db.prepare(`SELECT j.id,j.title,j.current_rule_version,j.created_at,j.archived_at,v.status
+      FROM jobs j LEFT JOIN job_rule_versions v ON v.job_id=j.id AND v.version=j.current_rule_version
+      WHERE j.archived_at ${archiveFilter} ORDER BY j.created_at DESC`).all();
     res.json({ items: jobs });
   });
+
+  const archiveError=(error:unknown,res:express.Response,next:express.NextFunction)=>{
+    if(error instanceof Error&&error.message==='job_not_found')return res.status(404).json({error:error.message});
+    if(error instanceof Error&&error.message==='job_has_active_task')return res.status(409).json({error:error.message});
+    next(error);
+  };
+  app.post('/api/jobs/:jobId/archive',(req,res,next)=>{try{res.json(archiveJob(db,req.params.jobId));}catch(error){archiveError(error,res,next);}});
+  app.post('/api/jobs/:jobId/restore',(req,res,next)=>{try{res.json(restoreJob(db,req.params.jobId));}catch(error){archiveError(error,res,next);}});
 
   app.post('/api/jobs', async (req, res, next) => {
     try {

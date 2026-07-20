@@ -23,4 +23,12 @@ describe('v1.2 non-technical workflow UI',()=>{
     expect(source).toContain('DeepSeek 未能生成有效岗位包，请检查连接后重试');
     expect(source).not.toContain("created.ai_generation==='fallback'");
   });
+
+  it('offers recoverable job archiving and restoration',async()=>{
+    const source=await readFile(new URL('../src/client/App.tsx',import.meta.url),'utf8');
+    for(const text of ['归档岗位','已归档岗位','恢复岗位','请先停止当前任务'])expect(source).toContain(text);
+    expect(source).toContain('api.archiveJob');
+    expect(source).toContain('api.restoreJob');
+    expect(source).not.toContain('api.deleteJob');
+  });
 });
