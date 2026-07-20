@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { migrate } from '../src/server/db/migrate.js';
-import { createDraft, approveVersion, makeDefaultJobPack } from '../src/server/services/job-pack.js';
+import { createDraft, approveVersion, makeDefaultJobPack, reviseDraft } from '../src/server/services/job-pack.js';
 import { GuluService } from '../src/server/services/gulu.js';
 
 const dbs: DatabaseSync[] = [];
@@ -90,5 +90,23 @@ describe('Gulu service', () => {
     const {service}=setup();service.confirmPlan('job-1',draft);const task=service.startTask('job-1','dry-run');
     service.recordFailure(task.id,'temporary_adapter_error');
     expect(service.setStatus(task.id,'completed').lastError).toBeNull();
+  });
+
+  it('lists newest tasks first and links candidates to each task history',()=>{
+    const {db,service}=setup();service.confirmPlan('job-1',draft);
+    const first=service.startTask('job-1','dry-run');service.setStatus(first.id,'completed');
+    const second=service.startTask('job-1','dry-run');
+    db.prepare(`INSERT INTO candidates(id,job_id,dedupe_key,name,current_company,current_role,experiences_json) VALUES (?,?,?,?,?,?,?)`)
+      .run('candidate-1','job-1','G-1','Candidate One','Example','Manager','[]');
+    service.linkCandidate(second.id,'candidate-1');
+    service.linkCandidate(second.id,'candidate-1');
+    expect(service.listTasks('job-1').map((task)=>task.id)).toEqual([second.id,first.id]);
+    expect(db.prepare('SELECT count(*) count FROM gulu_task_candidates WHERE task_id=?').get(second.id)).toEqual({count:1});
+  });
+
+  it('refuses a task when the latest rule version is no longer approved',()=>{
+    const {db,service}=setup();service.confirmPlan('job-1',draft);
+    reviseDraft(db,'job-1',{summary:'Changed requirements'});
+    expect(()=>service.startTask('job-1','dry-run')).toThrow('rules_not_approved');
   });
 });

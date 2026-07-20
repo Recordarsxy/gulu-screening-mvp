@@ -138,4 +138,31 @@ export function migrate(db: DatabaseSync): void {
       db.prepare('INSERT INTO schema_migrations(version) VALUES (4)').run(); db.exec('COMMIT');
     } catch (error) { db.exec('ROLLBACK'); throw error; }
   }
+  const version5 = db.prepare('SELECT 1 ok FROM schema_migrations WHERE version=5').get();
+  if (!version5) {
+    db.exec('BEGIN');
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS gulu_task_candidates (
+          task_id TEXT NOT NULL REFERENCES gulu_tasks(id) ON DELETE CASCADE,
+          candidate_id TEXT NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY(task_id,candidate_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_gulu_task_candidates_candidate ON gulu_task_candidates(candidate_id);
+      `);
+      const snapshots = db.prepare(`SELECT s.task_id,s.dedupe_key,s.snapshot_json,t.job_id
+        FROM gulu_snapshots s JOIN gulu_tasks t ON t.id=s.task_id`).all() as Array<{task_id:string;dedupe_key:string;snapshot_json:string;job_id:string}>;
+      const findCandidate = db.prepare(`SELECT id FROM candidates WHERE job_id=? AND
+        (gulu_id=? OR detail_url=? OR dedupe_key=?) LIMIT 1`);
+      const linkCandidate = db.prepare('INSERT OR IGNORE INTO gulu_task_candidates(task_id,candidate_id) VALUES (?,?)');
+      for (const row of snapshots) {
+        let snapshot:Record<string,unknown>={};
+        try { snapshot=JSON.parse(row.snapshot_json) as Record<string,unknown>; } catch { /* retain unmatched historical snapshot */ }
+        const candidate=findCandidate.get(row.job_id,String(snapshot.guluId??''),String(snapshot.detailUrl??''),row.dedupe_key) as {id:string}|undefined;
+        if(candidate)linkCandidate.run(row.task_id,candidate.id);
+      }
+      db.prepare('INSERT INTO schema_migrations(version) VALUES (5)').run(); db.exec('COMMIT');
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+  }
 }

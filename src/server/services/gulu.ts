@@ -52,6 +52,9 @@ export class GuluService {
 
   startTask(jobId:string,mode:'dry-run'|'pilot'|'formal'='dry-run'):GuluConnectorTask {
     const plan=this.getPlan(jobId); if (!plan || plan.status!=='confirmed') throw new Error('gulu_plan_not_confirmed');
+    const pack=getCurrentVersion(this.db,jobId);if(!pack)throw new Error('job_not_found');
+    if(pack.approval.status!=='approved')throw new Error('rules_not_approved');
+    if(pack.rule_version!==plan.ruleVersion)throw new Error('gulu_plan_outdated');
     if(mode==='pilot'&&!plan.rollout.dryRunCompleted)throw new Error('gulu_dry_run_required');
     if(mode==='formal'&&!plan.rollout.pilotCompleted)throw new Error('gulu_pilot_required');
     const active=this.db.prepare("SELECT 1 ok FROM gulu_tasks WHERE job_id=? AND status IN ('queued','running','paused','needs_attention')").get(jobId);
@@ -63,7 +66,20 @@ export class GuluService {
   getTask(id:string):GuluConnectorTask {
     const row=this.db.prepare('SELECT * FROM gulu_tasks WHERE id=?').get(id) as TaskRow|undefined;
     if (!row) throw new Error('run_not_found');
-    return GuluConnectorTaskSchema.parse({id:row.id,jobId:row.job_id,ruleVersion:row.rule_version,planVersion:row.plan_version,status:row.status,mode:row.mode,currentRound:row.current_round,page:row.page,candidateCursor:row.candidate_cursor,readCount:row.read_count,roundReadCount:row.round_read_count,dedupedCount:row.deduped_count,analyzedCount:row.analyzed_count,inputTokens:row.input_tokens,outputTokens:row.output_tokens,companyStatus:row.company_status,roleStatus:row.role_status,companyReadCount:row.company_read_count,roleReadCount:row.role_read_count,lastError:row.last_error});
+    return GuluConnectorTaskSchema.parse({id:row.id,jobId:row.job_id,ruleVersion:row.rule_version,planVersion:row.plan_version,status:row.status,mode:row.mode,currentRound:row.current_round,page:row.page,candidateCursor:row.candidate_cursor,readCount:row.read_count,roundReadCount:row.round_read_count,dedupedCount:row.deduped_count,analyzedCount:row.analyzed_count,inputTokens:row.input_tokens,outputTokens:row.output_tokens,companyStatus:row.company_status,roleStatus:row.role_status,companyReadCount:row.company_read_count,roleReadCount:row.role_read_count,lastError:row.last_error,createdAt:row.created_at,updatedAt:row.updated_at});
+  }
+
+  listTasks(jobId:string):GuluConnectorTask[] {
+    const rows=this.db.prepare('SELECT id FROM gulu_tasks WHERE job_id=? ORDER BY created_at DESC,rowid DESC').all(jobId) as Array<{id:string}>;
+    return rows.map((row)=>this.getTask(row.id));
+  }
+
+  linkCandidate(taskId:string,candidateId:string):void {
+    const task=this.getTask(taskId);
+    const candidate=this.db.prepare('SELECT job_id FROM candidates WHERE id=?').get(candidateId) as {job_id:string}|undefined;
+    if(!candidate)throw new Error('candidate_not_found');
+    if(candidate.job_id!==task.jobId)throw new Error('candidate_job_mismatch');
+    this.db.prepare('INSERT OR IGNORE INTO gulu_task_candidates(task_id,candidate_id) VALUES (?,?)').run(taskId,candidateId);
   }
 
   getTaskPlan(id:string):GuluSearchPlan {

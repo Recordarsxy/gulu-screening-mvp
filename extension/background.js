@@ -6,7 +6,7 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const pace = () => delay(800 + Math.floor(Math.random() * 701));
 
 async function stored() {
-  return chrome.storage.local.get(['connectorToken', 'guluTabId']);
+  return chrome.storage.local.get(['connectorToken', 'guluTabId', 'lastTaskId']);
 }
 
 async function api(path, init = {}) {
@@ -103,7 +103,8 @@ async function restoreList(tabId, round, page, submit) {
   if (state.state === 'login_required' || state.state === 'captcha') return state;
   if (state.state !== 'list') throw new Error('unsupported_page');
 
-  await send(tabId, 'applyFilters', { filters: round.filters, submit });
+  await send(tabId, 'resetFilters');
+  await send(tabId, 'applyFilters', { filters: round.filters, submit, reset: false });
   if (!submit) return { state: 'list' };
   await waitListSettled(tabId, 1, { minimumDelay: 2500 });
 
@@ -135,6 +136,8 @@ async function runOnce() {
 
     const { task, plan } = next;
     currentTask = task;
+    const saved = await stored();
+    const isNewTask = saved.lastTaskId !== task.id;
     if (task.status === 'queued') {
       await event(task.id, 'checkpoint', { checkpoint: { status: 'running' } }, `start:${task.id}`);
     }
@@ -147,6 +150,7 @@ async function runOnce() {
       await event(task.id, 'needs_attention', { error: state.state }, `attention:${task.id}:${state.state}`);
       return;
     }
+    if (isNewTask) await chrome.storage.local.set({ lastTaskId: task.id });
     await event(task.id, 'round_started', { round: task.currentRound }, `round-start:${task.id}:${task.currentRound}`);
 
     if (task.mode === 'dry-run') {

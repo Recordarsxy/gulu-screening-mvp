@@ -50,7 +50,7 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider() }: A
         const task=gulu.getTask(taskId);const snapshot=req.body.snapshot;
         const candidate={id:`${task.jobId}:gulu:${snapshot.guluId}`,jobId:task.jobId,dedupeKey:String(snapshot.guluId||snapshot.detailUrl),name:String(snapshot.name),guluId:String(snapshot.guluId),detailUrl:String(snapshot.detailUrl),currentCompany:String(snapshot.company??''),currentRole:String(snapshot.role??''),experiences:(snapshot.experiences??[]).map((item:Record<string,unknown>)=>({company:String(item.company??''),role:String(item.role??''),period:String(item.period??''),summary:String(item.summary??'')})),sourceRound:snapshot.sourceRound};
         const controller=new AbortController();taskControllers.set(taskId,controller);
-        try{const assessed=await engine.assessCandidate(task.jobId,task.ruleVersion,candidate,controller.signal);const latest=gulu.getTask(taskId);if(!['queued','running'].includes(latest.status))throw new Error('task_not_running');return assessed.created?gulu.recordAnalysis(taskId,assessed.decision.inputTokens,assessed.decision.outputTokens):recorded;}finally{if(taskControllers.get(taskId)===controller)taskControllers.delete(taskId);}
+        try{const assessed=await engine.assessCandidate(task.jobId,task.ruleVersion,candidate,controller.signal);const latest=gulu.getTask(taskId);if(!['queued','running'].includes(latest.status))throw new Error('task_not_running');gulu.linkCandidate(taskId,assessed.candidateId);return assessed.created?gulu.recordAnalysis(taskId,assessed.decision.inputTokens,assessed.decision.outputTokens):recorded;}finally{if(taskControllers.get(taskId)===controller)taskControllers.delete(taskId);}
       })();candidateRequests.set(requestKey,processing);
       try{return res.json(await processing);}finally{if(candidateRequests.get(requestKey)===processing)candidateRequests.delete(requestKey);}
     }
@@ -135,7 +135,13 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider() }: A
   app.put('/api/jobs/:jobId/gulu-plan',(req,res,next)=>{try{res.json(gulu.saveDraft({...req.body,jobId:req.params.jobId}))}catch(error){next(error)}});
   app.put('/api/jobs/:jobId/gulu-plan/confirm',(req,res,next)=>{try{res.json(gulu.confirmPlan(req.params.jobId,req.body))}catch(error){next(error)}});
   app.get('/api/jobs/:jobId/gulu-plan',(req,res)=>{const plan=gulu.getPlan(req.params.jobId);if(!plan)return res.status(404).json({error:'gulu_plan_not_found'});res.json(plan)});
-  app.post('/api/jobs/:jobId/runs/gulu',(req,res,next)=>{try{const requested=String(req.body?.mode??'dry-run');const mode=requested==='pilot'||requested==='formal'?requested:'dry-run';res.status(201).json(gulu.startTask(String(req.params.jobId),mode))}catch(error){if(error instanceof Error&&['gulu_plan_not_confirmed','gulu_dry_run_required','gulu_pilot_required','gulu_task_already_active'].includes(error.message))return res.status(409).json({error:error.message});next(error)}});
+  app.get('/api/jobs/:jobId/runs/gulu',(req,res)=>res.json({items:gulu.listTasks(String(req.params.jobId))}));
+  app.post('/api/jobs/:jobId/runs/gulu',(req,res,next)=>{try{
+    if(req.body?.fresh!==undefined&&typeof req.body.fresh!=='boolean')return res.status(400).json({error:'fresh_must_be_boolean'});
+    const requested=String(req.body?.mode??'dry-run');const mode=requested==='pilot'||requested==='formal'?requested:'dry-run';
+    if(req.body?.fresh===true&&mode!=='formal')return res.status(400).json({error:'fresh_requires_formal'});
+    res.status(201).json(gulu.startTask(String(req.params.jobId),mode));
+  }catch(error){if(error instanceof Error&&['gulu_plan_not_confirmed','rules_not_approved','gulu_plan_outdated','gulu_dry_run_required','gulu_pilot_required','gulu_task_already_active'].includes(error.message))return res.status(409).json({error:error.message});next(error)}});
 
   app.get('/api/jobs/:jobId/job-pack.json', (req, res) => {
     const pack = getCurrentVersion(db, req.params.jobId); if (!pack) return res.status(404).end();
@@ -170,6 +176,20 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider() }: A
   app.post('/api/runs/:runId/stop', (req, res, next) => { try { taskControllers.get(String(req.params.runId))?.abort();res.json(gulu.setStatus(String(req.params.runId),'stopped')); } catch (error) { next(error); } });
 
   app.get('/api/jobs/:jobId/results', (req, res) => {
+    const runId=typeof req.query.runId==='string'?req.query.runId:'';
+    if(runId){
+      if(!db.prepare('SELECT 1 ok FROM gulu_tasks WHERE id=? AND job_id=?').get(runId,req.params.jobId))return res.status(404).json({error:'run_not_found'});
+      const items=db.prepare(`SELECT c.id candidateId,c.name,c.gulu_id guluId,c.detail_url detailUrl,c.current_company currentCompany,
+        c.current_role currentRole,c.source_round sourceRound,a.label,a.reason_code reasonCode,a.evidence_json evidence,
+        a.rule_version ruleVersion,a.assessed_at assessedAt,COALESCE(h.status,'未复核') reviewStatus,COALESCE(h.note,'') note
+        FROM candidates c JOIN gulu_task_candidates tc ON tc.candidate_id=c.id
+        JOIN gulu_tasks t ON t.id=tc.task_id AND t.job_id=c.job_id
+        JOIN assessments a ON a.candidate_id=c.id AND a.rule_version=t.rule_version
+        LEFT JOIN human_reviews h ON h.candidate_id=c.id AND h.rule_version=a.rule_version
+        WHERE c.job_id=? AND t.id=? ORDER BY CASE a.label WHEN 'recommend' THEN 1 WHEN 'review' THEN 2 ELSE 3 END,c.name`)
+        .all(req.params.jobId,runId).map((row:any)=>({...row,evidence:JSON.parse(row.evidence)}));
+      return res.json({items});
+    }
     const items = db.prepare(`SELECT c.id candidateId,c.name,c.gulu_id guluId,c.detail_url detailUrl,c.current_company currentCompany,
       c.current_role currentRole,c.source_round sourceRound,a.label,a.reason_code reasonCode,a.evidence_json evidence,
       a.rule_version ruleVersion,a.assessed_at assessedAt,COALESCE(h.status,'未审核') reviewStatus,COALESCE(h.note,'') note

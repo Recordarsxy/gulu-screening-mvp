@@ -62,6 +62,16 @@ describe('Chrome extension safety boundary', () => {
     expect(source.indexOf('chrome.tabs.reload(tabId).catch(() => {});')).toBeLessThan(source.indexOf("await send(tabId, 'applyFilters'"));
   });
 
+  it('recognizes a new task id and resets semantic filters before applying it',async()=>{
+    const background=await readFile(new URL('../extension/background.js',import.meta.url),'utf8');
+    const content=await readFile(new URL('../extension/content.js',import.meta.url),'utf8');
+    expect(background).toContain("'lastTaskId'");
+    expect(background).toContain('saved.lastTaskId !== task.id');
+    expect(background).toContain("chrome.storage.local.set({ lastTaskId: task.id })");
+    expect(background.indexOf("await send(tabId, 'resetFilters')")).toBeLessThan(background.indexOf("await send(tabId, 'applyFilters'"));
+    expect(content).toContain("message.operation === 'resetFilters'");
+  });
+
   it('uses Manifest V3 with no sensitive browser permissions', async () => {
     const manifest = JSON.parse(await readFile(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
     expect(manifest.manifest_version).toBe(3);
@@ -73,7 +83,7 @@ describe('Chrome extension safety boundary', () => {
 
   it('exposes only semantic read operations and strips forbidden fields', async () => {
     const adapter = await import('../extension/gulu-adapter.js');
-    expect(adapter.SEMANTIC_OPERATIONS).toEqual(['inspectState','inspectListState','applyFilters','readList','openDetail','readDetail','nextPage']);
+    expect(adapter.SEMANTIC_OPERATIONS).toEqual(['inspectState','inspectListState','resetFilters','applyFilters','readList','openDetail','readDetail','nextPage']);
     const safe=adapter.sanitizeSnapshot({guluId:'1',name:'甲',detailUrl:'http://121.43.105.7/crm#candidate/detail?id=1',company:'示例',role:'经理',phone:'13800000000',email:'a@b.com',notes:'秘密',sourceRound:'role',page:1,capturedAt:new Date().toISOString()});
     expect(safe).not.toHaveProperty('phone');expect(safe).not.toHaveProperty('email');expect(safe).not.toHaveProperty('notes');
     expect(Object.keys(safe).sort()).toEqual(expect.arrayContaining(['guluId','name','detailUrl','company','role']));

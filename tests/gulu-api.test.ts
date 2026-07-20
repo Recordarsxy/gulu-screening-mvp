@@ -31,4 +31,24 @@ describe('Gulu connector API',()=>{
   const [first,second]=await Promise.all([request(`/api/connector/gulu/tasks/${task.data.id}/events`,{method:'POST',headers,body}),request(`/api/connector/gulu/tasks/${task.data.id}/events`,{method:'POST',headers,body})]);
   expect([first.status,second.status]).toEqual([200,200]);expect(assessments).toBe(1);
  });
+
+ it('starts a fresh formal task and keeps task-scoped result history',async()=>{
+  const request=await setup();
+  const created=await request('/api/jobs',{method:'POST',body:JSON.stringify({title:'Fresh role',sourceText:'Find account managers'})});const jobId=created.data.job_id;
+  await request(`/api/jobs/${jobId}/rules/1/approve`,{method:'POST'});
+  const draft=await request(`/api/jobs/${jobId}/gulu-plan/generate`,{method:'POST'});await request(`/api/jobs/${jobId}/gulu-plan/confirm`,{method:'PUT',body:JSON.stringify(draft.data)});
+  const pairing=await request('/api/connectors/gulu/pairing',{method:'POST'});const redeemed=await request('/api/connector/gulu/pairing/redeem',{method:'POST',body:JSON.stringify({code:pairing.data.code,extensionVersion:'1.2.0'})});const headers={authorization:`Bearer ${redeemed.data.token}`};
+  const candidate=(guluId:string,name:string)=>({eventId:`candidate:${guluId}`,type:'candidate',snapshot:{guluId,name,detailUrl:`http://121.43.105.7/crm#candidate/detail?id=${guluId}`,company:'Example',role:'Manager',sourceRound:'company',page:1,capturedAt:new Date().toISOString()}});
+  const complete=async(taskId:string)=>request(`/api/connector/gulu/tasks/${taskId}/events`,{method:'POST',headers,body:JSON.stringify({eventId:`completed:${taskId}`,type:'completed'})});
+  const dry=await request(`/api/jobs/${jobId}/runs/gulu`,{method:'POST',body:JSON.stringify({mode:'dry-run'})});
+  await request(`/api/connector/gulu/tasks/${dry.data.id}/events`,{method:'POST',headers,body:JSON.stringify(candidate('OLD-1','Old Candidate'))});await complete(dry.data.id);
+  const pilot=await request(`/api/jobs/${jobId}/runs/gulu`,{method:'POST',body:JSON.stringify({mode:'pilot'})});await complete(pilot.data.id);
+  expect((await request(`/api/jobs/${jobId}/runs/gulu`,{method:'POST',body:JSON.stringify({mode:'formal',fresh:'yes'})})).status).toBe(400);
+  const formal=await request(`/api/jobs/${jobId}/runs/gulu`,{method:'POST',body:JSON.stringify({mode:'formal',fresh:true})});
+  expect(formal.status).toBe(201);expect(formal.data).toMatchObject({mode:'formal',page:1,candidateCursor:0,readCount:0,analyzedCount:0,currentRound:'company'});
+  await request(`/api/connector/gulu/tasks/${formal.data.id}/events`,{method:'POST',headers,body:JSON.stringify(candidate('NEW-1','New Candidate'))});
+  const history=await request(`/api/jobs/${jobId}/runs/gulu`);expect(history.data.items.map((task:{id:string})=>task.id)).toEqual([formal.data.id,pilot.data.id,dry.data.id]);expect(history.data.items[0].createdAt).toBeTruthy();
+  const current=await request(`/api/jobs/${jobId}/results?runId=${formal.data.id}`);expect(current.data.items.map((item:{name:string})=>item.name)).toEqual(['New Candidate']);
+  const all=await request(`/api/jobs/${jobId}/results`);expect(new Set(all.data.items.map((item:{name:string})=>item.name))).toEqual(new Set(['Old Candidate','New Candidate']));
+ });
 });

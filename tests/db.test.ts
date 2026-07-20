@@ -40,4 +40,13 @@ describe('SQLite model', () => {
     const columns = (db.prepare('PRAGMA table_info(gulu_tasks)').all() as Array<{name:string}>).map((row) => row.name);
     expect(columns).toEqual(expect.arrayContaining(['plan_version','plan_json','company_status','role_status','company_read_count','role_read_count']));
   });
+
+  it('migrates task-scoped candidate history without deleting existing records', () => {
+    const db = openDatabase(':memory:'); databases.push(db); migrate(db);
+    const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{name:string}>).map((row) => row.name);
+    expect(tables).toContain('gulu_task_candidates');
+    expect(db.prepare('SELECT 1 ok FROM schema_migrations WHERE version=5').get()).toEqual({ok:1});
+    const columns = (db.prepare('PRAGMA table_info(gulu_task_candidates)').all() as Array<{name:string}>).map((row) => row.name);
+    expect(columns).toEqual(expect.arrayContaining(['task_id','candidate_id','created_at']));
+  });
 });

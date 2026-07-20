@@ -113,5 +113,6 @@ export const GuluConnectorTaskSchema = z.object({
   companyStatus: GuluRoundStatusSchema.default('pending'), roleStatus: GuluRoundStatusSchema.default('pending'),
   companyReadCount: z.number().int().nonnegative().default(0), roleReadCount: z.number().int().nonnegative().default(0),
   lastError: z.string().nullable().default(null),
+  createdAt: z.string().optional(), updatedAt: z.string().optional(),
 });
 export type GuluConnectorTask = z.infer<typeof GuluConnectorTaskSchema>;
