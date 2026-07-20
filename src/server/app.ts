@@ -25,7 +25,7 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider() }: A
   const candidateRequests=new Map<string,Promise<unknown>>();
   app.disable('x-powered-by'); app.use(express.json({ limit: '2mb' }));
 
-  app.get('/api/health', (_req, res) => res.json({ ok: true, host: '127.0.0.1', mode: 'local-only', version: '1.1.0' }));
+  app.get('/api/health', (_req, res) => res.json({ ok: true, host: '127.0.0.1', mode: 'local-only', version: '1.2.0' }));
 
   app.post('/api/connectors/gulu/pairing', (_req,res,next) => { try { res.status(201).json(gulu.createPairing()); } catch(error){ next(error); } });
   app.get('/api/connectors/gulu/status', (_req,res) => res.json(gulu.getStatus()));
