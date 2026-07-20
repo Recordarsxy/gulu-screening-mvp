@@ -31,4 +31,10 @@ describe('v1.2 non-technical workflow UI',()=>{
     expect(source).toContain('api.restoreJob');
     expect(source).not.toContain('api.deleteJob');
   });
+
+  it('always shows fresh-task readiness requirements',async()=>{
+    const source=await readFile(new URL('../src/client/App.tsx',import.meta.url),'utf8');
+    for(const text of ['岗位规则已批准','搜索方案已生成','搜索方案已人工确认','dry-run 已完成','真实 5 人试跑已完成','当前没有运行中的任务'])expect(source).toContain(text);
+    expect(source).toContain('<FreshTaskReadiness');
+  });
 });
