@@ -91,4 +91,23 @@ describe('local MVP API', () => {
     expect(created.status).toBe(201);expect(created.data.summary).toBe('DeepSeek 已分析');expect(created.data.search_plan).toHaveLength(2);
     expect(sent).not.toContain('138-1234-5678');expect(sent).not.toContain('hiring_01');
   });
+
+  it('stores job changes and integrates them into a new draft version', async () => {
+    let mergePayload:any=null;
+    const provider=new DeepSeekProvider({apiKey:'test',fetcher:async(_url,init)=>{
+      const request=JSON.parse(String(init?.body??'{}'));const payload=JSON.parse(request.messages[1].content);
+      if(payload.current_rules){mergePayload=payload;return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({...payload.current_rules,summary:'已整合最新变化'})}}]}),{status:200});}
+      return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify(payload.template)}}]}),{status:200});
+    }});
+    const request=await server(provider);
+    const created=await request('/api/jobs',{method:'POST',body:JSON.stringify({title:'供应链金融 BD',sourceText:'原始要求：负责大中华区客户拓展'})});
+    const jobId=created.data.job_id;await request(`/api/jobs/${jobId}/rules/1/approve`,{method:'POST'});
+    const change=await request(`/api/jobs/${jobId}/changes`,{method:'POST',body:JSON.stringify({text:'新增要求：优先跨境供应链金融经验'})});
+    expect(change.status).toBe(201);
+    const integrated=await request(`/api/jobs/${jobId}/changes/integrate`,{method:'POST',body:JSON.stringify({changeIds:[change.data.id]})});
+    expect(integrated.data).toMatchObject({rule_version:2,approval:{status:'draft'},summary:'已整合最新变化'});
+    const history=await request(`/api/jobs/${jobId}/changes`);
+    expect(history.data.items[0]).toMatchObject({text:'新增要求：优先跨境供应链金融经验',appliedRuleVersion:2});
+    expect(mergePayload).toMatchObject({original_source:'原始要求：负责大中华区客户拓展',changes:['新增要求：优先跨境供应链金融经验']});
+  });
 });

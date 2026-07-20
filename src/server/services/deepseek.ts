@@ -113,6 +113,18 @@ export class DeepSeekProvider {
     });
   }
 
+  async integrateJobChanges(base:JobPack,originalSource:string,changes:string[]):Promise<JobPack> {
+    const result=await this.generateJson('你是招聘岗位规则更新助手。将原始 JD、当前已批准规则和按时间排列的新变化整合为完整岗位包。新的明确要求覆盖冲突的旧要求，未被修改的规则必须保留。不得使用年龄、性别、婚育等受保护属性。只输出与 current_rules 结构一致的完整 JSON。',{
+      original_source:originalSource,current_rules:base,changes,
+    });
+    const envelope=result.data as Record<string,unknown>;const raw=((envelope.job_pack??envelope.data??envelope) as Partial<JobPack>);
+    return JobPackSchema.parse({...base,...raw,
+      constraints:{...base.constraints,...raw.constraints},industries:{...base.industries,...raw.industries},companies:{...base.companies,...raw.companies},
+      roles:{...base.roles,...raw.roles},evidence:{...base.evidence,...raw.evidence},job_id:base.job_id,rule_version:base.rule_version,
+      approval:{status:'draft',approved_at:null},decision_policy:{labels:['recommend','review','exclude'],missing_information:'review'},
+    });
+  }
+
   async generateGuluSearchPlan(pack: JobPack): Promise<DeepSeekResult<GuluSearchPlan>> {
     const result=await this.generateJson<{rounds?:Array<Record<string,unknown>>}>('根据已批准岗位规则生成谷露两轮结构化搜索条件。第一轮必须是 company，第二轮必须是 role。只输出 rounds JSON；筛选字段仅可使用 keywords、companies、roles、cities、industries、functions。',{
       rules:{constraints:pack.constraints,industries:pack.industries,companies:pack.companies,roles:pack.roles,evidence:pack.evidence},

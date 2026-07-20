@@ -69,3 +69,12 @@ describe('DeepSeek provider', () => {
     expect(pack).toMatchObject({job_id:'job-ai',summary:'AI 摘要',search_plan:['公司轮：目标公司'],approval:{status:'draft'}});expect(pack.constraints).toEqual(base.constraints);
   });
 });
+
+it('integrates job changes while preserving server-controlled identity and version', async () => {
+  let sent:any;
+  const provider=new DeepSeekProvider({apiKey:'test',fetcher:async(_url,init)=>{const body=JSON.parse(String(init?.body));sent=JSON.parse(body.messages[1].content);return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({...sent.current_rules,job_id:'wrong',rule_version:99,summary:'更新后'})}}]}),{status:200})}});
+  const base={job_id:'job-1',rule_version:1,approval:{status:'approved',approved_at:new Date().toISOString()},constraints:{hard:[],soft:[],ignore:[]},industries:{target:[],adjacent:[],excluded:[]},companies:{target:[]},roles:{exact:['BD'],synonyms:[],adjacent:[],excluded:[]},evidence:{required:[],transferable:[],negative:[]},search_plan:[],decision_policy:{labels:['recommend','review','exclude'] as const,missing_information:'review' as const},questions:[],summary:'原规则',ideal_candidate:''};
+  const merged=await (provider as any).integrateJobChanges(base,'原始 JD',['新增要求']);
+  expect(merged).toMatchObject({job_id:'job-1',rule_version:1,approval:{status:'draft'},summary:'更新后'});
+  expect(sent).toMatchObject({original_source:'原始 JD',changes:['新增要求']});
+});

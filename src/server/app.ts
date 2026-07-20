@@ -12,6 +12,7 @@ import { buildCsv, buildWorkbook, deleteJobData } from './services/exports.js';
 import { DeepSeekProvider } from './services/deepseek.js';
 import { sanitizeTextForCloud } from './services/redaction.js';
 import { GuluService } from './services/gulu.js';
+import { JobChangeService } from './services/job-changes.js';
 
 type AppDeps = { db: DatabaseSync; dataRoot: string; deepSeek?: DeepSeekProvider };
 
@@ -19,6 +20,7 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider() }: A
   const app = express(); const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
   const engine = new ScreeningEngine(db, deepSeek);
   const gulu = new GuluService(db);
+  const jobChanges = new JobChangeService(db);
   const taskControllers=new Map<string,AbortController>();
   const candidateRequests=new Map<string,Promise<unknown>>();
   app.disable('x-powered-by'); app.use(express.json({ limit: '2mb' }));
@@ -104,6 +106,17 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider() }: A
   app.post('/api/jobs/:jobId/rules/:version/approve', (req, res, next) => {
     try { res.json(approveVersion(db, req.params.jobId, Number(req.params.version))); } catch (error) { next(error); }
   });
+
+  app.get('/api/jobs/:jobId/changes',(req,res,next)=>{try{res.json({items:jobChanges.list(req.params.jobId)})}catch(error){next(error)}});
+  app.post('/api/jobs/:jobId/changes',(req,res,next)=>{try{res.status(201).json(jobChanges.create(req.params.jobId,String(req.body?.text??'')))}catch(error){next(error)}});
+  app.post('/api/jobs/:jobId/changes/integrate',async(req,res,next)=>{try{
+    const jobId=req.params.jobId;const current=getCurrentVersion(db,jobId);if(!current)return res.status(404).json({error:'job_not_found'});
+    if(current.approval.status!=='approved')return res.status(409).json({error:'rules_not_approved'});
+    const ids=Array.isArray(req.body?.changeIds)?req.body.changeIds.map(String):[];const notes=jobChanges.getSelected(jobId,ids);
+    const job=db.prepare('SELECT source_text FROM jobs WHERE id=?').get(jobId) as {source_text:string};
+    const merged=await deepSeek.integrateJobChanges(current,sanitizeTextForCloud(job.source_text),notes.map((note)=>sanitizeTextForCloud(note.text)));
+    const nextPack=reviseDraft(db,jobId,merged);jobChanges.markApplied(jobId,ids,nextPack.rule_version);res.json(nextPack);
+  }catch(error){next(error)}});
 
   app.post('/api/jobs/:jobId/gulu-plan/generate',async(req,res,next)=>{try{
     const pack=getCurrentVersion(db,req.params.jobId);if(!pack)return res.status(404).json({error:'job_not_found'});if(pack.approval.status!=='approved')return res.status(409).json({error:'rules_not_approved'});
