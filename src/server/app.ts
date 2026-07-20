@@ -122,6 +122,13 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider() }: A
     const pack=getCurrentVersion(db,req.params.jobId);if(!pack)return res.status(404).json({error:'job_not_found'});if(pack.approval.status!=='approved')return res.status(409).json({error:'rules_not_approved'});
     const generated=await deepSeek.generateGuluSearchPlan(pack);res.json(gulu.saveDraft(generated.data));
   }catch(error){next(error)}});
+  app.post('/api/jobs/:jobId/gulu-plan/import',async(req,res,next)=>{try{
+    const pack=getCurrentVersion(db,req.params.jobId);if(!pack)return res.status(404).json({error:'job_not_found'});if(pack.approval.status!=='approved')return res.status(409).json({error:'rules_not_approved'});
+    const sourceNotes=String(req.body?.sourceNotes??'').trim();if(!sourceNotes)return res.status(400).json({error:'source_notes_required'});
+    const generated=await deepSeek.generateGuluSearchPlan(pack,sanitizeTextForCloud(sourceNotes));
+    res.json(gulu.saveDraft({...generated.data,sourceNotes}));
+  }catch(error){next(error)}});
+  app.put('/api/jobs/:jobId/gulu-plan',(req,res,next)=>{try{res.json(gulu.saveDraft({...req.body,jobId:req.params.jobId}))}catch(error){next(error)}});
   app.put('/api/jobs/:jobId/gulu-plan/confirm',(req,res,next)=>{try{res.json(gulu.confirmPlan(req.params.jobId,req.body))}catch(error){next(error)}});
   app.get('/api/jobs/:jobId/gulu-plan',(req,res)=>{const plan=gulu.getPlan(req.params.jobId);if(!plan)return res.status(404).json({error:'gulu_plan_not_found'});res.json(plan)});
   app.post('/api/jobs/:jobId/runs/gulu',(req,res,next)=>{try{const requested=String(req.body?.mode??'dry-run');const mode=requested==='pilot'||requested==='formal'?requested:'dry-run';res.status(201).json(gulu.startTask(String(req.params.jobId),mode))}catch(error){if(error instanceof Error&&['gulu_plan_not_confirmed','gulu_dry_run_required','gulu_pilot_required','gulu_task_already_active'].includes(error.message))return res.status(409).json({error:error.message});next(error)}});
