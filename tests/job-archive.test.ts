@@ -1,6 +1,5 @@
 import {afterEach,describe,expect,it} from 'vitest';
 import type {AddressInfo} from 'node:net';
-import type {DatabaseSync} from 'node:sqlite';
 import {openDatabase} from '../src/server/db/connection.js';
 import {migrate} from '../src/server/db/migrate.js';
 import {createApp} from '../src/server/app.js';
