@@ -13,6 +13,9 @@ describe('Windows delivery', () => {
     expect(launcher).not.toContain('0.0.0.0');
     const start = await readFile(new URL('../scripts/start.mjs', import.meta.url), 'utf8');
     expect(start).toContain('--env-file-if-exists=.env');
+    expect(start).toContain("spawn('explorer.exe', [localUrl]");
+    expect(start).toContain('if (await isHealthy())');
+    expect(start).toContain('openLocalUrl();');
   });
 
   it('is parsed by Windows cmd without truncating commands', async () => {
