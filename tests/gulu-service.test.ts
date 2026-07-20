@@ -57,6 +57,7 @@ describe('Gulu service', () => {
     expect(service.completeRound(task.id,'company',false).companyStatus).toBe('completed');
     expect(service.startRound(task.id,'role').roleStatus).toBe('running');
     expect(service.completeRound(task.id,'role',true).roleStatus).toBe('empty');
+    expect(service.getTaskPlan(task.id)).toMatchObject({version:confirmed.version,status:'confirmed'});
   });
 
   it('pauses after three consecutive connector failures', () => {

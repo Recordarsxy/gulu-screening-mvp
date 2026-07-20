@@ -31,6 +31,15 @@ describe('Chrome extension safety boundary', () => {
     expect(source).toContain("status: 'online', busy: true");
   });
 
+  it('records round completion and resumes the role round immediately',async()=>{
+    const source=await readFile(new URL('../extension/background.js',import.meta.url),'utf8');
+    expect(source).toContain("'round_started'");
+    expect(source).toContain("'round_completed'");
+    expect(source).toContain("chrome.alarms.create('gulu-resume'");
+    expect(source).toContain('when: Date.now() + 1000');
+    expect(source).toContain('resumeSoon();');
+  });
+
   it('waits for a committed query and three stable observations',async()=>{
     const source=await readFile(new URL('../extension/background.js',import.meta.url),'utf8');
     expect(source).toContain('state.queryReady');

@@ -66,6 +66,11 @@ export class GuluService {
     return GuluConnectorTaskSchema.parse({id:row.id,jobId:row.job_id,ruleVersion:row.rule_version,planVersion:row.plan_version,status:row.status,mode:row.mode,currentRound:row.current_round,page:row.page,candidateCursor:row.candidate_cursor,readCount:row.read_count,roundReadCount:row.round_read_count,dedupedCount:row.deduped_count,analyzedCount:row.analyzed_count,inputTokens:row.input_tokens,outputTokens:row.output_tokens,companyStatus:row.company_status,roleStatus:row.role_status,companyReadCount:row.company_read_count,roleReadCount:row.role_read_count,lastError:row.last_error});
   }
 
+  getTaskPlan(id:string):GuluSearchPlan {
+    const row=this.db.prepare('SELECT plan_json FROM gulu_tasks WHERE id=?').get(id) as {plan_json:string}|undefined;if(!row)throw new Error('run_not_found');
+    return GuluSearchPlanSchema.parse(JSON.parse(row.plan_json));
+  }
+
   startRound(id:string,round:'company'|'role'):GuluConnectorTask {
     this.getTask(id); const column=round==='company'?'company_status':'role_status';
     this.db.prepare(`UPDATE gulu_tasks SET ${column}='running',updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(id);

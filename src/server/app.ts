@@ -38,7 +38,7 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider() }: A
   app.post('/api/connector/gulu/heartbeat',connectorAuth,(req,res)=>{gulu.heartbeat(String(req.body?.status??'online'),req.body?.error?String(req.body.error):null);res.json({ok:true});});
   app.get('/api/connector/gulu/tasks/next',connectorAuth,(_req,res)=>{
     const row=db.prepare("SELECT id,job_id FROM gulu_tasks WHERE status IN ('queued','running') ORDER BY created_at LIMIT 1").get() as {id:string;job_id:string}|undefined;
-    if (!row) return res.json({task:null}); const task=gulu.getTask(row.id); const plan=gulu.getPlan(row.job_id); res.json({task,plan,pacingMs:{min:800,max:1500}});
+    if (!row) return res.json({task:null}); const task=gulu.getTask(row.id); const plan=gulu.getTaskPlan(row.id); res.json({task,plan,pacingMs:{min:800,max:1500}});
   });
   app.post('/api/connector/gulu/tasks/:taskId/events',connectorAuth,async(req,res,next)=>{try{
     const type=String(req.body?.type??''); const eventId=String(req.body?.eventId??''); if(!eventId) return res.status(400).json({error:'event_id_required'});
@@ -55,6 +55,10 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider() }: A
       try{return res.json(await processing);}finally{if(candidateRequests.get(requestKey)===processing)candidateRequests.delete(requestKey);}
     }
     if(type==='failure') return res.json(gulu.recordFailure(taskId,String(req.body?.error??'connector_failure')));
+    if(type==='round_started'||type==='round_completed'){
+      const round=String(req.body?.round??'');if(round!=='company'&&round!=='role')return res.status(400).json({error:'invalid_round'});
+      return res.json(type==='round_started'?gulu.startRound(taskId,round):gulu.completeRound(taskId,round,Boolean(req.body?.empty)));
+    }
     if(type==='checkpoint') return res.json(gulu.updateCheckpoint(taskId,req.body.checkpoint??{}));
     if(type==='completed') return res.json(gulu.setStatus(taskId,'completed'));
     if(type==='needs_attention') return res.json(gulu.pauseForReason(taskId,String(req.body?.error??'需要人工处理')));

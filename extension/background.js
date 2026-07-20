@@ -70,6 +70,10 @@ function candidateEventId(task, seed) {
   return `candidate:${task.id}:${task.currentRound}:${seed.guluId}`;
 }
 
+function resumeSoon() {
+  chrome.alarms.create('gulu-resume', { when: Date.now() + 1000 });
+}
+
 async function waitListSettled(tabId, expectedPage, { minimumDelay = 0, previousSignature = null } = {}) {
   const started = Date.now();
   let stableSignature = null;
@@ -143,12 +147,15 @@ async function runOnce() {
       await event(task.id, 'needs_attention', { error: state.state }, `attention:${task.id}:${state.state}`);
       return;
     }
+    await event(task.id, 'round_started', { round: task.currentRound }, `round-start:${task.id}:${task.currentRound}`);
 
     if (task.mode === 'dry-run') {
+      await event(task.id, 'round_completed', { round: task.currentRound, empty: false }, `round-complete:${task.id}:${task.currentRound}`);
       if (task.currentRound === 'company') {
         await event(task.id, 'checkpoint', {
           checkpoint: { currentRound: 'role', page: 1, candidateCursor: 0 },
         }, `dry-round:${task.id}:role`);
+        resumeSoon();
       } else {
         await event(task.id, 'completed', {}, `complete:${task.id}`);
       }
@@ -203,15 +210,18 @@ async function runOnce() {
     }
 
     if (task.mode === 'pilot' && totalRead >= 5) {
+      await event(task.id, 'round_completed', { round: task.currentRound, empty: false }, `round-complete:${task.id}:${task.currentRound}`);
       await event(task.id, 'completed', {}, `complete:${task.id}`);
       return;
     }
 
     if ((task.mode !== 'pilot' && roundRead >= round.limit) || list.length === 0) {
+      await event(task.id, 'round_completed', { round: task.currentRound, empty: list.length === 0 }, `round-complete:${task.id}:${task.currentRound}`);
       if (task.currentRound === 'company') {
         await event(task.id, 'checkpoint', {
           checkpoint: { currentRound: 'role', page: 1, candidateCursor: 0 },
         }, `round:${task.id}:role`);
+        resumeSoon();
       } else if (task.mode === 'pilot') {
         await event(task.id, 'needs_attention', { error: 'pilot_insufficient_candidates' }, `attention:${task.id}:pilot-insufficient`);
       } else {
@@ -226,12 +236,16 @@ async function runOnce() {
         checkpoint: { page: task.page + 1, candidateCursor: 0 },
       }, `page:${task.id}:${task.currentRound}:${task.page + 1}`);
     } else if (task.currentRound === 'company') {
+      await event(task.id, 'round_completed', { round: task.currentRound, empty: false }, `round-complete:${task.id}:${task.currentRound}`);
       await event(task.id, 'checkpoint', {
         checkpoint: { currentRound: 'role', page: 1, candidateCursor: 0 },
       }, `round:${task.id}:role`);
+      resumeSoon();
     } else if (task.mode === 'pilot') {
+      await event(task.id, 'round_completed', { round: task.currentRound, empty: false }, `round-complete:${task.id}:${task.currentRound}`);
       await event(task.id, 'needs_attention', { error: 'pilot_insufficient_candidates' }, `attention:${task.id}:pilot-insufficient`);
     } else {
+      await event(task.id, 'round_completed', { round: task.currentRound, empty: false }, `round-complete:${task.id}:${task.currentRound}`);
       await event(task.id, 'completed', {}, `complete:${task.id}`);
     }
   } catch (error) {
