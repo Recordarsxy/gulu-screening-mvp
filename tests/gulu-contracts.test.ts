@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GuluCandidateSnapshotSchema, GuluSearchPlanSchema } from '../src/shared/contracts.js';
+import { GuluCandidateSnapshotSchema, GuluConnectorTaskSchema, GuluSearchPlanSchema, JobChangeNoteSchema } from '../src/shared/contracts.js';
 
 const plan = { jobId:'job-1', ruleVersion:1, status:'draft', confirmedAt:null, rounds:[
   { kind:'company', limit:50, filters:{ companies:['示例科技'] } },
@@ -19,5 +19,17 @@ describe('Gulu public contracts', () => {
     for (const forbidden of ['phone','email','wechat','address','photo','notes','attachment']) {
       expect(() => GuluCandidateSnapshotSchema.parse({ ...safe, [forbidden]:'secret' })).toThrow();
     }
+  });
+
+  it('parses versioned plans, job changes, and per-round task progress', () => {
+    const now = new Date().toISOString();
+    expect(GuluSearchPlanSchema.parse({ ...plan, version:2, sourceNotes:'同事建议', createdAt:now, updatedAt:now }).version).toBe(2);
+    expect(JobChangeNoteSchema.parse({ id:'change-1',jobId:'job-1',text:'新增要求',createdAt:now,appliedRuleVersion:null }).text).toBe('新增要求');
+    const task = GuluConnectorTaskSchema.parse({
+      id:'task-1',jobId:'job-1',ruleVersion:1,planVersion:2,status:'completed',mode:'formal',currentRound:'role',page:1,
+      candidateCursor:0,readCount:7,roundReadCount:0,dedupedCount:7,analyzedCount:7,inputTokens:0,outputTokens:0,lastError:null,
+      companyStatus:'completed',roleStatus:'empty',companyReadCount:7,roleReadCount:0,
+    });
+    expect(task).toMatchObject({planVersion:2,companyStatus:'completed',roleStatus:'empty',companyReadCount:7,roleReadCount:0});
   });
 });

@@ -45,8 +45,18 @@ describe('Gulu service', () => {
     service.recordCandidate(task.id,'event-2',{...snapshot,sourceRound:'role'});
     service.updateCheckpoint(task.id,{currentRound:'role',page:3,candidateCursor:7});
     const restored=service.getTask(task.id);
-    expect(restored).toMatchObject({readCount:2,dedupedCount:1,currentRound:'role',page:3,candidateCursor:7});
+    expect(restored).toMatchObject({readCount:2,dedupedCount:1,currentRound:'role',page:3,candidateCursor:7,companyReadCount:1,roleReadCount:1});
     expect(service.recordCandidate(task.id,'event-1',snapshot).duplicateEvent).toBe(true);
+  });
+
+  it('stores an immutable plan version and explicit round completion', () => {
+    const {db,service}=setup(); const saved=service.saveDraft(draft); const confirmed=service.confirmPlan('job-1',saved); const task=service.startTask('job-1');
+    expect(task).toMatchObject({planVersion:confirmed.version,companyStatus:'pending',roleStatus:'pending'});
+    expect(JSON.parse((db.prepare('SELECT plan_json FROM gulu_tasks WHERE id=?').get(task.id) as {plan_json:string}).plan_json).version).toBe(confirmed.version);
+    expect(service.startRound(task.id,'company').companyStatus).toBe('running');
+    expect(service.completeRound(task.id,'company',false).companyStatus).toBe('completed');
+    expect(service.startRound(task.id,'role').roleStatus).toBe('running');
+    expect(service.completeRound(task.id,'role',true).roleStatus).toBe('empty');
   });
 
   it('pauses after three consecutive connector failures', () => {

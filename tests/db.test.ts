@@ -32,4 +32,12 @@ describe('SQLite model', () => {
     const columns = db.prepare('PRAGMA table_info(runs)').all() as Array<{name:string}>;
     expect(columns.map((column)=>column.name)).toContain('input_json');
   });
+
+  it('migrates versioned job changes and round progress', () => {
+    const db = openDatabase(':memory:'); databases.push(db); migrate(db);
+    const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{name:string}>).map((row) => row.name);
+    expect(tables).toEqual(expect.arrayContaining(['job_change_notes','gulu_search_plan_versions']));
+    const columns = (db.prepare('PRAGMA table_info(gulu_tasks)').all() as Array<{name:string}>).map((row) => row.name);
+    expect(columns).toEqual(expect.arrayContaining(['plan_version','plan_json','company_status','role_status','company_read_count','role_read_count']));
+  });
 });
