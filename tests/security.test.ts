@@ -13,6 +13,7 @@ describe('Windows delivery', () => {
     expect(launcher).not.toContain('0.0.0.0');
     const start = await readFile(new URL('../scripts/start.mjs', import.meta.url), 'utf8');
     expect(start).toContain('--env-file-if-exists=.env');
+    expect(launcher).toContain('if not exist node_modules\\.bin\\vite.cmd');
     expect(start).toContain("spawn('explorer.exe', [localUrl]");
     expect(start).toContain('if (await isHealthy())');
     expect(start).toContain("const expectedVersion = '1.2.0'");

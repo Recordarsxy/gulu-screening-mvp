@@ -24,7 +24,7 @@ if %NODE_MAJOR% LSS 24 (
 
 if /i "%~1"=="--check" exit /b 0
 
-if not exist node_modules (
+if not exist node_modules\.bin\vite.cmd (
   echo Installing dependencies for the first launch...
   call npm.cmd install --no-audit --no-fund
   if errorlevel 1 goto :failed
