@@ -45,6 +45,9 @@ describe('Chrome extension safety boundary', () => {
     expect(source).toContain('state.queryReady');
     expect(source).toContain('stableCount >= 3');
     expect(source).toContain('minimumDelay: 2500');
+    expect(source).toContain("const beforeQuery = await send(tabId, 'inspectListState');");
+    expect(source).toContain('previousSignature: beforeQuery.signature');
+    expect(source).not.toContain('|| expectedPage === 1');
   });
 
   it('waits up to sixty seconds for candidates or an explicit empty state',async()=>{
