@@ -11,7 +11,8 @@ describe('local MVP API', () => {
 
   async function server(deepSeek?:DeepSeekProvider,jobPackTimeoutMs?:number) {
     const db = openDatabase(':memory:'); migrate(db);
-    const app = createApp({ db, dataRoot: process.cwd(),deepSeek,jobPackTimeoutMs });
+    const configured=deepSeek??new DeepSeekProvider({apiKey:'test',fetcher:async(_url,init)=>{const body=JSON.parse(String(init?.body??'{}'));const payload=JSON.parse(body.messages[1].content);return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify(payload.template)}}]}),{status:200})}});
+    const app = createApp({ db, dataRoot: process.cwd(),deepSeek:configured,jobPackTimeoutMs });
     const http = app.listen(0, '127.0.0.1'); await new Promise<void>((resolve) => http.once('listening', resolve));
     closers.push(() => { http.close(); db.close(); });
     const port = (http.address() as AddressInfo).port;
@@ -92,12 +93,20 @@ describe('local MVP API', () => {
     expect(sent).not.toContain('138-1234-5678');expect(sent).not.toContain('hiring_01');
   });
 
-  it('returns a reviewable base pack when DeepSeek job generation exceeds its deadline',async()=>{
+  it('does not create a job when DeepSeek job generation exceeds its deadline',async()=>{
     const provider=new DeepSeekProvider({apiKey:'test',fetcher:async(_url,init)=>{await new Promise(resolve=>setTimeout(resolve,80));const body=JSON.parse(String(init?.body??'{}'));const payload=JSON.parse(body.messages[1].content);return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify(payload.template)}}]}),{status:200})}});
     const request=await server(provider,10);
     const created=await request('/api/jobs',{method:'POST',body:JSON.stringify({title:'Timeout role',sourceText:'Account manager'})});
-    expect(created.status).toBe(201);
-    expect(created.data).toMatchObject({ai_generation:'fallback',approval:{status:'draft'}});
+    expect(created).toMatchObject({status:503,data:{error:'job_pack_generation_timeout'}});
+    expect((await request('/api/jobs')).data.items).toHaveLength(0);
+  });
+
+  it('does not create a job when DeepSeek returns an invalid response',async()=>{
+    const provider=new DeepSeekProvider({apiKey:'test',fetcher:async()=>new Response('{"error":"upstream"}',{status:500})});
+    const request=await server(provider,100);
+    const created=await request('/api/jobs',{method:'POST',body:JSON.stringify({title:'Failed role',sourceText:'Account manager'})});
+    expect(created).toMatchObject({status:503,data:{error:'job_pack_generation_failed'}});
+    expect((await request('/api/jobs')).data.items).toHaveLength(0);
   });
 
   it('stores job changes and integrates them into a new draft version', async () => {

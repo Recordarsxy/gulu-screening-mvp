@@ -16,7 +16,7 @@ import { JobChangeService } from './services/job-changes.js';
 
 type AppDeps = { db: DatabaseSync; dataRoot: string; deepSeek?: DeepSeekProvider; jobPackTimeoutMs?:number };
 
-export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobPackTimeoutMs=Number(process.env.JOB_PACK_TIMEOUT_MS||15_000) }: AppDeps) {
+export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobPackTimeoutMs=Number(process.env.JOB_PACK_TIMEOUT_MS||60_000) }: AppDeps) {
   const app = express(); const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
   const engine = new ScreeningEngine(db, deepSeek);
   const gulu = new GuluService(db);
@@ -24,12 +24,16 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
   const taskControllers=new Map<string,AbortController>();
   const candidateRequests=new Map<string,Promise<unknown>>();
   const generateInitialPack=async(base:ReturnType<typeof makeDefaultJobPack>,safeSource:string)=>{
-    if(!deepSeek.isConfigured())return {pack:base,aiGeneration:'not_configured'};
-    const controller=new AbortController();let timeout:ReturnType<typeof setTimeout>|undefined;
+    if(!deepSeek.isConfigured())throw new Error('job_pack_generation_failed');
+    const controller=new AbortController();
+    let timeout:ReturnType<typeof setTimeout>|undefined;
+    const deadline=new Promise<never>((_resolve,reject)=>{timeout=setTimeout(()=>{controller.abort();reject(new Error('job_pack_generation_timeout'))},Math.max(1,jobPackTimeoutMs));});
     try{
-      const deadline=new Promise<never>((_resolve,reject)=>{timeout=setTimeout(()=>{controller.abort();reject(new Error('job_pack_timeout'))},Math.max(1,jobPackTimeoutMs));});
-      return {pack:await Promise.race([deepSeek.generateJobPack(base,safeSource,controller.signal),deadline]),aiGeneration:'completed'};
-    }catch{return {pack:base,aiGeneration:'fallback'};}finally{if(timeout)clearTimeout(timeout);}
+      return await Promise.race([deepSeek.generateJobPack(base,safeSource,controller.signal),deadline]);
+    }catch(error){
+      if(controller.signal.aborted||(error instanceof Error&&error.message==='job_pack_generation_timeout'))throw new Error('job_pack_generation_timeout');
+      throw new Error('job_pack_generation_failed');
+    }finally{if(timeout)clearTimeout(timeout);}
   };
   app.disable('x-powered-by'); app.use(express.json({ limit: '2mb' }));
 
@@ -85,9 +89,9 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
       if (!title || !sourceText) return res.status(400).json({ error: 'title_and_source_required' });
       const jobId = randomUUID(); const safeSource=sanitizeTextForCloud(sourceText);const base=makeDefaultJobPack(jobId,title,safeSource);
       const generated=await generateInitialPack(base,safeSource);
-      const pack = createDraft(db, { jobId, title, sourceText,pack:generated.pack });
+      const pack = createDraft(db, { jobId, title, sourceText,pack:generated });
       db.prepare('UPDATE jobs SET source_hash=? WHERE id=?').run(createHash('sha256').update(sourceText).digest('hex'), jobId);
-      res.status(201).json({...pack,ai_generation:generated.aiGeneration});
+      res.status(201).json(pack);
     } catch (error) { next(error); }
   });
 
@@ -100,9 +104,9 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
       const sourcePath = join(directory, req.file.originalname.replace(/[^\w.\-\u4e00-\u9fa5]/g, '_')); await writeFile(sourcePath, req.file.buffer);
       const safeSource=sanitizeTextForCloud(parsed.text);const base=makeDefaultJobPack(jobId,title,safeSource);
       const generated=await generateInitialPack(base,safeSource);
-      const pack = createDraft(db, { jobId, title, sourceText: parsed.text,pack:generated.pack });
+      const pack = createDraft(db, { jobId, title, sourceText: parsed.text,pack:generated });
       db.prepare('UPDATE jobs SET source_hash=?,source_path=? WHERE id=?').run(parsed.sha256, sourcePath, jobId);
-      res.status(201).json({...pack,ai_generation:generated.aiGeneration});
+      res.status(201).json(pack);
     } catch (error) { next(error); }
   });
 
@@ -242,6 +246,7 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
   });
 
   app.use((error: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    if(['job_pack_generation_timeout','job_pack_generation_failed'].includes(error.message))return res.status(503).json({error:error.message});
     const known = ['job_not_found','run_not_found','rule_version_not_found','document_has_no_extractable_text','unsafe_source_path','protected_attribute_rule','confirmation_required','candidate_not_in_job','pairing_code_invalid','gulu_plan_not_confirmed','task_aborted'];
     res.status(known.includes(error.message) ? 400 : 500).json({ error: error.message || 'internal_error' });
   });

@@ -15,10 +15,12 @@ describe('v1.2 non-technical workflow UI',()=>{
     expect(source).toContain('api.results(selected,run.id)');
   });
 
-  it('explains DeepSeek job generation progress and timeout fallback',async()=>{
+  it('explains AI-first job generation and retryable failure',async()=>{
     const source=await readFile(new URL('../src/client/App.tsx',import.meta.url),'utf8');
-    expect(source).toContain('DeepSeek 正在分析岗位要求，通常需要 5–15 秒');
-    expect(source).toContain("created.ai_generation==='fallback'");
-    expect(source).toContain('已先生成基础岗位包');
+    expect(source).toContain('DeepSeek 正在分析岗位要求，最长约 60 秒');
+    expect(source).toContain('job_pack_generation_timeout');
+    expect(source).toContain('DeepSeek 分析超过 60 秒，请重新生成');
+    expect(source).toContain('DeepSeek 未能生成有效岗位包，请检查连接后重试');
+    expect(source).not.toContain("created.ai_generation==='fallback'");
   });
 });
