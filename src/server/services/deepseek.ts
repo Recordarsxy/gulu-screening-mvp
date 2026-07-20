@@ -91,11 +91,11 @@ export class DeepSeekProvider {
     return { ...parsed, model:result.model, inputTokens:result.usage.inputTokens, outputTokens:result.usage.outputTokens };
   }
 
-  async generateJobPack(base: JobPack, safeSourceText: string): Promise<JobPack> {
+  async generateJobPack(base: JobPack, safeSourceText: string,signal?:AbortSignal): Promise<JobPack> {
     const result = await this.generateJson('你是招聘岗位分析助手。基于客户要求生成完整岗位筛选包，包含硬/软条件、行业、目标公司、精确/同义/相邻职位、正面/可迁移/明确反证、公司轮和职位轮搜索计划、待确认问题、岗位摘要、理想候选人。不得使用年龄、性别、婚育作为判断条件；信息不明时写入 questions，不得臆造。只输出与输入结构一致的完整 json。', {
       template: base,
       source_text: safeSourceText,
-    });
+    },signal);
     const envelope=result.data as Record<string,unknown>;
     const raw=((envelope.job_pack ?? envelope.data ?? envelope) as Partial<JobPack>);
     return JobPackSchema.parse({

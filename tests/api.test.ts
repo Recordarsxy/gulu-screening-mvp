@@ -9,9 +9,9 @@ describe('local MVP API', () => {
   const closers: Array<() => void> = [];
   afterEach(() => closers.splice(0).forEach((close) => close()));
 
-  async function server(deepSeek?:DeepSeekProvider) {
+  async function server(deepSeek?:DeepSeekProvider,jobPackTimeoutMs?:number) {
     const db = openDatabase(':memory:'); migrate(db);
-    const app = createApp({ db, dataRoot: process.cwd(),deepSeek });
+    const app = createApp({ db, dataRoot: process.cwd(),deepSeek,jobPackTimeoutMs });
     const http = app.listen(0, '127.0.0.1'); await new Promise<void>((resolve) => http.once('listening', resolve));
     closers.push(() => { http.close(); db.close(); });
     const port = (http.address() as AddressInfo).port;
@@ -90,6 +90,14 @@ describe('local MVP API', () => {
     const request=await server(provider);const created=await request('/api/jobs',{method:'POST',body:JSON.stringify({title:'销售经理',sourceText:'制造业客户，电话 +86 138-1234-5678，微信: hiring_01'})});
     expect(created.status).toBe(201);expect(created.data.summary).toBe('DeepSeek 已分析');expect(created.data.search_plan).toHaveLength(2);
     expect(sent).not.toContain('138-1234-5678');expect(sent).not.toContain('hiring_01');
+  });
+
+  it('returns a reviewable base pack when DeepSeek job generation exceeds its deadline',async()=>{
+    const provider=new DeepSeekProvider({apiKey:'test',fetcher:async(_url,init)=>{await new Promise(resolve=>setTimeout(resolve,80));const body=JSON.parse(String(init?.body??'{}'));const payload=JSON.parse(body.messages[1].content);return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify(payload.template)}}]}),{status:200})}});
+    const request=await server(provider,10);
+    const created=await request('/api/jobs',{method:'POST',body:JSON.stringify({title:'Timeout role',sourceText:'Account manager'})});
+    expect(created.status).toBe(201);
+    expect(created.data).toMatchObject({ai_generation:'fallback',approval:{status:'draft'}});
   });
 
   it('stores job changes and integrates them into a new draft version', async () => {

@@ -15,6 +15,9 @@ describe('Windows delivery', () => {
     expect(start).toContain('--env-file-if-exists=.env');
     expect(start).toContain("spawn('explorer.exe', [localUrl]");
     expect(start).toContain('if (await isHealthy())');
+    expect(start).toContain("const expectedVersion = '1.2.0'");
+    expect(start).toContain('payload.version === expectedVersion');
+    expect(start).toContain('请先关闭旧版本服务窗口');
     expect(start).toContain('openLocalUrl();');
   });
 

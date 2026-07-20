@@ -14,4 +14,11 @@ describe('v1.2 non-technical workflow UI',()=>{
     expect(source).toContain('api.listGuluRuns(id)');
     expect(source).toContain('api.results(selected,run.id)');
   });
+
+  it('explains DeepSeek job generation progress and timeout fallback',async()=>{
+    const source=await readFile(new URL('../src/client/App.tsx',import.meta.url),'utf8');
+    expect(source).toContain('DeepSeek 正在分析岗位要求，通常需要 5–15 秒');
+    expect(source).toContain("created.ai_generation==='fallback'");
+    expect(source).toContain('已先生成基础岗位包');
+  });
 });

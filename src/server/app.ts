@@ -14,15 +14,23 @@ import { sanitizeTextForCloud } from './services/redaction.js';
 import { GuluService } from './services/gulu.js';
 import { JobChangeService } from './services/job-changes.js';
 
-type AppDeps = { db: DatabaseSync; dataRoot: string; deepSeek?: DeepSeekProvider };
+type AppDeps = { db: DatabaseSync; dataRoot: string; deepSeek?: DeepSeekProvider; jobPackTimeoutMs?:number };
 
-export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider() }: AppDeps) {
+export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobPackTimeoutMs=Number(process.env.JOB_PACK_TIMEOUT_MS||15_000) }: AppDeps) {
   const app = express(); const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
   const engine = new ScreeningEngine(db, deepSeek);
   const gulu = new GuluService(db);
   const jobChanges = new JobChangeService(db);
   const taskControllers=new Map<string,AbortController>();
   const candidateRequests=new Map<string,Promise<unknown>>();
+  const generateInitialPack=async(base:ReturnType<typeof makeDefaultJobPack>,safeSource:string)=>{
+    if(!deepSeek.isConfigured())return {pack:base,aiGeneration:'not_configured'};
+    const controller=new AbortController();let timeout:ReturnType<typeof setTimeout>|undefined;
+    try{
+      const deadline=new Promise<never>((_resolve,reject)=>{timeout=setTimeout(()=>{controller.abort();reject(new Error('job_pack_timeout'))},Math.max(1,jobPackTimeoutMs));});
+      return {pack:await Promise.race([deepSeek.generateJobPack(base,safeSource,controller.signal),deadline]),aiGeneration:'completed'};
+    }catch{return {pack:base,aiGeneration:'fallback'};}finally{if(timeout)clearTimeout(timeout);}
+  };
   app.disable('x-powered-by'); app.use(express.json({ limit: '2mb' }));
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, host: '127.0.0.1', mode: 'local-only', version: '1.2.0' }));
@@ -76,10 +84,10 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider() }: A
       const title = String(req.body?.title || '').trim(); const sourceText = String(req.body?.sourceText || '').trim();
       if (!title || !sourceText) return res.status(400).json({ error: 'title_and_source_required' });
       const jobId = randomUUID(); const safeSource=sanitizeTextForCloud(sourceText);const base=makeDefaultJobPack(jobId,title,safeSource);
-      const generated=deepSeek.isConfigured()?await deepSeek.generateJobPack(base,safeSource):base;
-      const pack = createDraft(db, { jobId, title, sourceText,pack:generated });
+      const generated=await generateInitialPack(base,safeSource);
+      const pack = createDraft(db, { jobId, title, sourceText,pack:generated.pack });
       db.prepare('UPDATE jobs SET source_hash=? WHERE id=?').run(createHash('sha256').update(sourceText).digest('hex'), jobId);
-      res.status(201).json(pack);
+      res.status(201).json({...pack,ai_generation:generated.aiGeneration});
     } catch (error) { next(error); }
   });
 
@@ -91,10 +99,10 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider() }: A
       const jobId = randomUUID(); const directory = join(dataRoot, 'uploads', jobId); await mkdir(directory, { recursive: true });
       const sourcePath = join(directory, req.file.originalname.replace(/[^\w.\-\u4e00-\u9fa5]/g, '_')); await writeFile(sourcePath, req.file.buffer);
       const safeSource=sanitizeTextForCloud(parsed.text);const base=makeDefaultJobPack(jobId,title,safeSource);
-      const generated=deepSeek.isConfigured()?await deepSeek.generateJobPack(base,safeSource):base;
-      const pack = createDraft(db, { jobId, title, sourceText: parsed.text,pack:generated });
+      const generated=await generateInitialPack(base,safeSource);
+      const pack = createDraft(db, { jobId, title, sourceText: parsed.text,pack:generated.pack });
       db.prepare('UPDATE jobs SET source_hash=?,source_path=? WHERE id=?').run(parsed.sha256, sourcePath, jobId);
-      res.status(201).json(pack);
+      res.status(201).json({...pack,ai_generation:generated.aiGeneration});
     } catch (error) { next(error); }
   });
 

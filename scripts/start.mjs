@@ -3,14 +3,21 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const port = process.env.PORT || '4318';
 const localUrl = `http://127.0.0.1:${port}`;
+const expectedVersion = '1.2.0';
 
-async function isHealthy() {
+async function healthPayload() {
   try {
     const response = await fetch(`${localUrl}/api/health`);
-    return response.ok;
+    if (!response.ok) return null;
+    return await response.json();
   } catch {
-    return false;
+    return null;
   }
+}
+
+async function isHealthy() {
+  const payload = await healthPayload();
+  return Boolean(payload && payload.version === expectedVersion);
 }
 
 function openLocalUrl() {
@@ -21,7 +28,11 @@ function openLocalUrl() {
   opener.unref();
 }
 
-if (await isHealthy()) {
+const existing = await healthPayload();
+if (existing && existing.version !== expectedVersion) {
+  throw new Error(`4318 端口正在运行版本 ${existing.version ?? '未知'}。请先关闭旧版本服务窗口，再重新双击 v1.2 启动器。`);
+}
+if (existing?.version === expectedVersion) {
   openLocalUrl();
   await delay(250);
   process.exit(0);
