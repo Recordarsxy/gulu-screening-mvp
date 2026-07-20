@@ -68,6 +68,43 @@ describe('DeepSeek provider', () => {
     const base=makeDefaultJobPack('job-ai','销售经理','JD');const pack=await new DeepSeekProvider({apiKey:'test',fetcher}).generateJobPack(base,'JD');
     expect(pack).toMatchObject({job_id:'job-ai',summary:'AI 摘要',search_plan:['公司轮：目标公司'],approval:{status:'draft'}});expect(pack.constraints).toEqual(base.constraints);
   });
+
+  it('retries a length-truncated job pack once with a larger token budget',async()=>{
+    const budgets:number[]=[];let attempts=0;
+    const fetcher:typeof fetch=async(_url,init)=>{
+      const body=JSON.parse(String(init?.body));budgets.push(body.max_tokens);attempts+=1;
+      if(attempts===1)return new Response(JSON.stringify({choices:[{finish_reason:'length',message:{content:'{"job_pack":{"summary":"被截断"'}}]}),{status:200});
+      return new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:'{"job_pack":{"summary":"完整岗位包","search_plan":["公司轮：目标公司","职位轮：海外销售经理"]}}'}}]}),{status:200});
+    };
+    const base=makeDefaultJobPack('job-retry','海外销售经理','真实客户要求');
+    const pack=await new DeepSeekProvider({apiKey:'test',fetcher}).generateJobPack(base,'真实客户要求');
+    expect(pack.summary).toBe('完整岗位包');
+    expect(attempts).toBe(2);
+    expect(budgets).toEqual([4000,7000]);
+  });
+
+  it('retries an unchanged template instead of accepting an empty AI job pack',async()=>{
+    const budgets:number[]=[];const payloads:Array<Record<string,unknown>>=[];let attempts=0;
+    const fetcher:typeof fetch=async(_url,init)=>{
+      const body=JSON.parse(String(init?.body));budgets.push(body.max_tokens);const payload=JSON.parse(body.messages[1].content);payloads.push(payload);attempts+=1;
+      const content=attempts===1?payload.template:{...payload.template,summary:'Meshy 海外销售经理',companies:{target:['阿里云']},search_plan:['公司轮：阿里云','职位轮：海外销售经理']};
+      return new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:JSON.stringify(content)}}]}),{status:200});
+    };
+    const base=makeDefaultJobPack('job-empty-retry','海外销售经理','Meshy 客户要求');
+    const pack=await new DeepSeekProvider({apiKey:'test',fetcher}).generateJobPack(base,'Meshy 客户要求');
+    expect(pack).toMatchObject({summary:'Meshy 海外销售经理',companies:{target:['阿里云']}});
+    expect(attempts).toBe(2);
+    expect(budgets).toEqual([4000,7000]);
+    expect(payloads[1]).toMatchObject({retry_reason:'上一次输出没有形成有效岗位规则，请根据 source_text 实质填写 template，不得原样返回。'});
+  });
+
+  it('does not retry a non-truncation job-pack failure',async()=>{
+    let attempts=0;
+    const fetcher:typeof fetch=async()=>{attempts+=1;return new Response('{"error":"upstream"}',{status:500})};
+    const base=makeDefaultJobPack('job-no-retry','海外销售经理','真实客户要求');
+    await expect(new DeepSeekProvider({apiKey:'test',fetcher}).generateJobPack(base,'真实客户要求')).rejects.toMatchObject({code:'api_error'});
+    expect(attempts).toBe(1);
+  });
 });
 
 it('integrates job changes while preserving server-controlled identity and version', async () => {

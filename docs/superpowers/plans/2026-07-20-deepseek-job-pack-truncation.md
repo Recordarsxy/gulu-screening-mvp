@@ -44,6 +44,10 @@ Run `npm.cmd test -- tests/deepseek.test.ts`; expect all DeepSeek tests to pass.
 
 ### Task 2: Full and real-case verification
 
+Before full verification, add an API regression proving AI-only protected hard filters are ignored and confirmation-required hard filters are downgraded to soft review items. Implement `normalizeAiDraftRules` in `src/server/services/job-pack.ts` and apply it to generated job packs.
+
+Also add a provider regression for an unchanged default template. Require at least two material rule dimensions, retry an empty/invalid model result once with an explicit retry reason, and reject a second empty result.
+
 **Files:**
 - No production files beyond Task 1.
 
@@ -66,4 +70,3 @@ Submit the original request and JD, wait for the generated draft, and inspect it
 - [ ] **Step 4: Verify persistence and safety**
 
 Confirm exactly one Meshy test job exists, it remains a draft, and no Gulu screening task was created.
-

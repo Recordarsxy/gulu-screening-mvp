@@ -11,7 +11,7 @@ describe('recoverable job archive API',()=>{
 
   async function setup(){
     const db=openDatabase(':memory:');migrate(db);
-    const provider=new DeepSeekProvider({apiKey:'test',fetcher:async(_url,init)=>{const body=JSON.parse(String(init?.body??'{}'));const payload=JSON.parse(body.messages[1].content);return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify(payload.template)}}]}),{status:200})}});
+    const provider=new DeepSeekProvider({apiKey:'test',fetcher:async(_url,init)=>{const body=JSON.parse(String(init?.body??'{}'));const payload=JSON.parse(body.messages[1].content);return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({...payload.template,summary:'AI 已分析',search_plan:[...payload.template.search_plan,'公司轮：示例科技']})}}]}),{status:200})}});
     const http=createApp({db,dataRoot:process.cwd(),deepSeek:provider}).listen(0,'127.0.0.1');
     await new Promise<void>(resolve=>http.once('listening',resolve));close.push(()=>{http.close();db.close()});
     const port=(http.address() as AddressInfo).port;

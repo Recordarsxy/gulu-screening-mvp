@@ -11,7 +11,7 @@ describe('local MVP API', () => {
 
   async function server(deepSeek?:DeepSeekProvider,jobPackTimeoutMs?:number) {
     const db = openDatabase(':memory:'); migrate(db);
-    const configured=deepSeek??new DeepSeekProvider({apiKey:'test',fetcher:async(_url,init)=>{const body=JSON.parse(String(init?.body??'{}'));const payload=JSON.parse(body.messages[1].content);return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify(payload.template)}}]}),{status:200})}});
+    const configured=deepSeek??new DeepSeekProvider({apiKey:'test',fetcher:async(_url,init)=>{const body=JSON.parse(String(init?.body??'{}'));const payload=JSON.parse(body.messages[1].content);return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({...payload.template,summary:'AI 已分析',search_plan:[...payload.template.search_plan,'公司轮：示例科技']})}}]}),{status:200})}});
     const app = createApp({ db, dataRoot: process.cwd(),deepSeek:configured,jobPackTimeoutMs });
     const http = app.listen(0, '127.0.0.1'); await new Promise<void>((resolve) => http.once('listening', resolve));
     closers.push(() => { http.close(); db.close(); });
@@ -93,6 +93,20 @@ describe('local MVP API', () => {
     expect(sent).not.toContain('138-1234-5678');expect(sent).not.toContain('hiring_01');
   });
 
+  it('downgrades unconfirmed AI hard filters before persisting a reviewable draft',async()=>{
+    const provider=new DeepSeekProvider({apiKey:'test',fetcher:async(_url,init)=>{
+      const request=JSON.parse(String(init?.body??'{}'));const payload=JSON.parse(request.messages[1].content);
+      return new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:JSON.stringify({...payload.template,summary:'Meshy 海外销售经理规则',companies:{target:['阿里云']},constraints:{hard:['3年以上海外 B2B 销售经验','城市限北京、上海、深圳','年龄 35 岁以下','vibe coding 能力'],soft:[],ignore:[]},evidence:{...payload.template.evidence,required:['本科以上']}})}}]}),{status:200});
+    }});
+    const request=await server(provider);
+    const created=await request('/api/jobs',{method:'POST',body:JSON.stringify({title:'Meshy AI 海外销售经理',sourceText:'3 年以上经验；地点北京、上海、深圳；年龄待确认，不得硬筛'})});
+    expect(created.status).toBe(201);
+    expect(created.data.constraints.hard).toEqual(['vibe coding 能力']);
+    expect(created.data.constraints.soft).toEqual(expect.arrayContaining(['3年以上海外 B2B 销售经验','城市限北京、上海、深圳','本科以上']));
+    expect(created.data.constraints.ignore).toContain('年龄 35 岁以下');
+    expect(created.data.questions).toEqual(expect.arrayContaining(['请人工确认是否将“3年以上海外 B2B 销售经验”设为硬筛条件','请人工确认是否将“城市限北京、上海、深圳”设为硬筛条件']));
+  });
+
   it('does not create a job when DeepSeek job generation exceeds its deadline',async()=>{
     const provider=new DeepSeekProvider({apiKey:'test',fetcher:async(_url,init)=>{await new Promise(resolve=>setTimeout(resolve,80));const body=JSON.parse(String(init?.body??'{}'));const payload=JSON.parse(body.messages[1].content);return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify(payload.template)}}]}),{status:200})}});
     const request=await server(provider,10);
@@ -114,7 +128,7 @@ describe('local MVP API', () => {
     const provider=new DeepSeekProvider({apiKey:'test',fetcher:async(_url,init)=>{
       const request=JSON.parse(String(init?.body??'{}'));const payload=JSON.parse(request.messages[1].content);
       if(payload.current_rules){mergePayload=payload;return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({...payload.current_rules,summary:'已整合最新变化'})}}]}),{status:200});}
-      return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify(payload.template)}}]}),{status:200});
+      return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({...payload.template,summary:'AI 初始分析',search_plan:[...payload.template.search_plan,'公司轮：示例科技']})}}]}),{status:200});
     }});
     const request=await server(provider);
     const created=await request('/api/jobs',{method:'POST',body:JSON.stringify({title:'供应链金融 BD',sourceText:'原始要求：负责大中华区客户拓展'})});
