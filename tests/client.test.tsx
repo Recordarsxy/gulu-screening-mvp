@@ -1,13 +1,2 @@
-import { describe, expect, it } from 'vitest';
-import { renderToStaticMarkup } from 'react-dom/server';
-import { App } from '../src/client/App.js';
-
-describe('MVP shell', () => {
-  it('shows local-only and human-review safety boundaries', () => {
-    const html = renderToStaticMarkup(<App />);
-    expect(html).toContain('谷露简历筛选');
-    expect(html).toContain('仅在本机运行');
-    expect(html).toContain('最终决定由人工审核');
-    expect(html).toContain('创建岗位');
-  });
-});
+import {describe,expect,it} from 'vitest';import {renderToStaticMarkup} from 'react-dom/server';import {App} from '../src/client/App.js';
+describe('MVP shell',()=>{it('shows local and human-review safety boundaries',()=>{const html=renderToStaticMarkup(<App/>);expect(html).toContain('谷露简历筛选');expect(html).toContain('仅在本机运行');expect(html).toContain('最终决定由人工审核');expect(html).toContain('创建岗位');});});

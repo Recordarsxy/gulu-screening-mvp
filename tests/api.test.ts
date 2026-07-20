@@ -61,6 +61,23 @@ describe('local MVP API', () => {
     expect((await request(`/api/jobs/${two.data.job_id}/reviews/${encodeURIComponent(candidate)}`,{method:'PUT',body:JSON.stringify({status:'已复核'})})).status).toBe(404);
   });
 
+  it('returns only assessments from the current rule version',async()=>{
+    const request=await server();
+    const created=await request('/api/jobs',{method:'POST',body:JSON.stringify({title:'Versioned role',sourceText:'JD'})});
+    const jobId=created.data.job_id;
+    await request(`/api/jobs/${jobId}/rules/1/approve`,{method:'POST'});
+    const first=await request(`/api/jobs/${jobId}/runs/demo`,{method:'POST'});
+    await request(`/api/runs/${first.data.id}/process`,{method:'POST',body:JSON.stringify({limit:50})});
+    const revised=await request(`/api/jobs/${jobId}/rules`,{method:'PUT',body:JSON.stringify({summary:'Version two'})});
+    await request(`/api/jobs/${jobId}/rules/${revised.data.rule_version}/approve`,{method:'POST'});
+    const second=await request(`/api/jobs/${jobId}/runs/demo`,{method:'POST'});
+    await request(`/api/runs/${second.data.id}/process`,{method:'POST',body:JSON.stringify({limit:50})});
+
+    const results=await request(`/api/jobs/${jobId}/results`);
+    expect(results.data.items).toHaveLength(10);
+    expect(new Set(results.data.items.map((item:{ruleVersion:number})=>item.ruleVersion))).toEqual(new Set([2]));
+  });
+
   it('reports missing DeepSeek key without exposing a secret', async () => {
     const request = await server();
     const result = await request('/api/settings/test-deepseek', { method: 'POST', body: '{}' });

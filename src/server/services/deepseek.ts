@@ -1,6 +1,6 @@
 import { assertNoSensitiveText } from './redaction.js';
 import { z } from 'zod';
-import { JobPackSchema, type JobPack } from '../../shared/contracts.js';
+import { GuluSearchPlanSchema, JobPackSchema, type GuluSearchPlan, type JobPack } from '../../shared/contracts.js';
 import type { SafeCandidate } from './redaction.js';
 
 export type DeepSeekUsage = { inputTokens: number; outputTokens: number };
@@ -43,7 +43,7 @@ export class DeepSeekProvider {
     return `${url.href.replace(/\/$/, '')}/chat/completions`;
   }
 
-  async generateJson<T = unknown>(instruction: string, payload: unknown): Promise<DeepSeekResult<T>> {
+  async generateJson<T = unknown>(instruction: string, payload: unknown, signal?:AbortSignal): Promise<DeepSeekResult<T>> {
     if (!this.apiKey) throw new DeepSeekError('missing_api_key');
     assertNoSensitiveText(payload);
     const response = await this.fetcher(this.endpoint(), {
@@ -59,6 +59,7 @@ export class DeepSeekProvider {
         stream: false,
         max_tokens: 1800,
       }),
+      signal,
     });
     if (!response.ok) {
       const text = (await response.text()).slice(0, 300);
@@ -76,11 +77,11 @@ export class DeepSeekProvider {
     };
   }
 
-  async assessCandidate(pack: JobPack, candidate: SafeCandidate): Promise<AiDecision> {
+  async assessCandidate(pack: JobPack, candidate: SafeCandidate, signal?:AbortSignal): Promise<AiDecision> {
     const result = await this.generateJson('你是招聘筛选助手。规则优先，信息缺失必须标记 review；只有简历中存在明确反证时才能 exclude。输出 label、reasonCode、evidence 的 json。', {
       rules: { constraints: pack.constraints, industries: pack.industries, roles: pack.roles, evidence: pack.evidence, decision_policy: pack.decision_policy },
       candidate,
-    });
+    },signal);
     const raw = result.data as Record<string, unknown>;
     const normalized = typeof raw.evidence === 'string' ? { ...raw, evidence: [raw.evidence] } : raw;
     const parsed = AiDecisionSchema.parse(normalized);
@@ -110,6 +111,20 @@ export class DeepSeekProvider {
       approval: { status:'draft',approved_at:null },
       decision_policy: {labels:['recommend','review','exclude'],missing_information:'review'},
     });
+  }
+
+  async generateGuluSearchPlan(pack: JobPack): Promise<DeepSeekResult<GuluSearchPlan>> {
+    const result=await this.generateJson<{rounds?:Array<Record<string,unknown>>}>('根据已批准岗位规则生成谷露两轮结构化搜索条件。第一轮必须是 company，第二轮必须是 role。只输出 rounds JSON；筛选字段仅可使用 keywords、companies、roles、cities、industries、functions。',{
+      rules:{constraints:pack.constraints,industries:pack.industries,companies:pack.companies,roles:pack.roles,evidence:pack.evidence},
+    });
+    const rounds=(result.data.rounds??[]).map((round,index)=>({
+      ...round,kind:index===0?'company':'role',limit:Math.min(50,Math.max(1,Number(round.limit)||50)),filters:{
+        keywords:[],companies:[],roles:[],cities:[],industries:[],functions:[],
+        ...((round.filters && typeof round.filters==='object')?round.filters:{}),
+      },
+    }));
+    const data=GuluSearchPlanSchema.parse({jobId:pack.job_id,ruleVersion:pack.rule_version,status:'draft',confirmedAt:null,rounds});
+    return {data,usage:result.usage,model:result.model};
   }
 
   async testConnection(): Promise<ConnectionResult> {

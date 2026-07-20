@@ -3,6 +3,16 @@ import { DeepSeekError, DeepSeekProvider } from '../src/server/services/deepseek
 import { makeDefaultJobPack } from '../src/server/services/job-pack.js';
 
 describe('DeepSeek provider', () => {
+  it('generates a structured two-round Gulu plan capped at 50', async () => {
+    const fetcher:typeof fetch=async()=>new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({rounds:[
+      {kind:'company',limit:99,filters:{companies:['示例科技']}},
+      {kind:'role',limit:80,filters:{roles:['产品经理']}}
+    ]})}}]}),{status:200});
+    const base=makeDefaultJobPack('job-gulu','产品经理','JD');
+    const result=await new DeepSeekProvider({apiKey:'test',fetcher}).generateGuluSearchPlan(base);
+    expect(result.data).toMatchObject({jobId:'job-gulu',ruleVersion:1,status:'draft'});
+    expect(result.data.rounds.map((round)=>round.limit)).toEqual([50,50]);
+  });
   it('requests JSON output with configurable model and parses usage', async () => {
     let body: Record<string, unknown> = {};
     const fetcher: typeof fetch = async (_url, init) => {

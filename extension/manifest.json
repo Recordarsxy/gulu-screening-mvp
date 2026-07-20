@@ -1,10 +1,12 @@
 {
   "manifest_version": 3,
-  "name": "谷露筛选只读连接器（未配置）",
-  "version": "1.0.0",
-  "description": "仅连接本机谷露筛选 MVP。真实谷露适配器配置前不会读取任何招聘页面。",
-  "permissions": [],
-  "host_permissions": ["http://127.0.0.1/*"],
+  "name": "谷露只读后台连接器",
+  "version": "1.1.0",
+  "description": "连接本机筛选服务，在后台只读执行已确认的谷露搜索计划。",
+  "permissions": ["tabs", "storage", "alarms"],
+  "host_permissions": ["http://121.43.105.7/*", "http://127.0.0.1/*"],
   "background": { "service_worker": "background.js", "type": "module" },
-  "action": { "default_title": "谷露筛选连接器：未配置" }
+  "content_scripts": [{ "matches": ["http://121.43.105.7/crm*"], "js": ["content.js"], "run_at": "document_idle" }],
+  "web_accessible_resources": [{ "resources": ["gulu-adapter.js"], "matches": ["http://121.43.105.7/*"] }],
+  "action": { "default_title": "谷露只读后台连接器", "default_popup": "popup.html" }
 }
