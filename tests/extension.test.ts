@@ -91,6 +91,9 @@ describe('Chrome extension safety boundary', () => {
     expect(background).toContain("scope.scope !== 'all_talent'");
     expect(background.indexOf("await send(tabId, 'resetFilters')")).toBeLessThan(background.indexOf("await send(tabId, 'applyFilters'"));
     expect(content).toContain("message.operation === 'resetFilters'");
+    const adapter=await readFile(new URL('../extension/gulu-adapter.js',import.meta.url),'utf8');
+    const reset=adapter.slice(adapter.indexOf('async function resetFilters'),adapter.indexOf('async function applyFilters'));
+    expect(reset).not.toContain('label?.click()');
   });
 
   it('uses Manifest V3 with no sensitive browser permissions', async () => {
