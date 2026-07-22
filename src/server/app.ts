@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import express from 'express';
 import multer from 'multer';
-import { approveVersion, createDraft, getCurrentVersion, makeDefaultJobPack, reviseDraft } from './services/job-pack.js';
+import { approveVersion, createDraft, getCurrentVersion, makeDefaultJobPack, restoreDraft, reviseDraft } from './services/job-pack.js';
 import { generateHumanGuide, parseSource } from './services/documents.js';
 import { ScreeningEngine } from './services/screening.js';
 import { demoCompanyRound, demoRoleRound } from './demo/candidates.js';
@@ -14,6 +14,7 @@ import { sanitizeCandidate, sanitizeTextForCloud } from './services/redaction.js
 import { GuluService } from './services/gulu.js';
 import { JobChangeService } from './services/job-changes.js';
 import { archiveJob, restoreJob } from './services/job-archive.js';
+import { resetJobSection, type JobResetSection } from './services/job-reset.js';
 
 type AppDeps = { db: DatabaseSync; dataRoot: string; deepSeek?: DeepSeekProvider; jobPackTimeoutMs?:number };
 
@@ -75,10 +76,7 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
     if(type==='step_calibrated'){
       const stepId=String(req.body?.stepId??'');const task=gulu.getTask(taskId);const progress=task.stepProgress.find(item=>item.stepId===stepId);if(!progress)return res.status(400).json({error:'invalid_step'});
       const metrics={read:progress.readCount,unique:progress.uniqueCount,highFit:progress.highFitCount,duplicateRate:progress.duplicateRate};
-      if(progress.uniqueCount<3){gulu.recordStrategyDecision(taskId,stepId,'next_step',metrics,'首批新增候选不足3人');return res.json(gulu.completeStep(taskId,stepId,progress.uniqueCount===0))}
-      if(progress.highFitCount===0){gulu.recordStrategyDecision(taskId,stepId,'next_step',metrics,'首批候选无高匹配，自动切换搜索方向');return res.json(gulu.completeStep(taskId,stepId,false))}
-      let decision;try{const companies=(db.prepare(`SELECT DISTINCT c.current_company company FROM gulu_search_fits f JOIN candidates c ON c.id=f.candidate_id WHERE f.task_id=? AND f.step_id=? AND f.score>=70 AND c.current_company<>'' LIMIT 10`).all(taskId,stepId) as Array<{company:string}>).map(row=>row.company);decision=(await deepSeek.decideGuluStrategy({campaignSummary:gulu.getTaskStrategy(taskId).campaign.summary,stepTitle:gulu.getCurrentCampaignStep(taskId)?.title??stepId,metrics,candidateCompanies:companies})).data}catch{decision={action:'continue' as const,rationale:'DeepSeek调优暂时不可用，继续执行已确认步骤',companies:[]}}
-      gulu.recordStrategyDecision(taskId,stepId,decision.action,metrics,decision.rationale,{companies:decision.companies});if(decision.action==='append_company_step')for(const company of decision.companies)try{gulu.appendCompanyStep(taskId,company)}catch{/* duplicate or budget exhausted */}if(decision.action==='next_step'||(Boolean(req.body?.exhausted)&&decision.action==='continue'))return res.json(gulu.completeStep(taskId,stepId,false));if(decision.action==='stop')return res.json(gulu.stopCampaign(taskId,decision.completionReason??'strategy_stop'));return res.json(gulu.finishCalibration(taskId,stepId));
+      const action=req.body?.exhausted?'next_step':'continue';const rationale=action==='next_step'?'当前结果已遍历完，切换搜索方向':'已有候选，继续遍历当前搜索结果';gulu.recordStrategyDecision(taskId,stepId,action,metrics,rationale);return res.json(action==='next_step'?gulu.completeStep(taskId,stepId,false):gulu.finishCalibration(taskId,stepId));
     }
     if(type==='step_completed'){const stepId=String(req.body?.stepId??'');if(!stepId)return res.status(400).json({error:'invalid_step'});return res.json(gulu.completeStep(taskId,stepId,Boolean(req.body?.empty)))}
     if(type==='round_started'||type==='round_completed'){
@@ -106,6 +104,15 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
   };
   app.post('/api/jobs/:jobId/archive',(req,res,next)=>{try{res.json(archiveJob(db,req.params.jobId));}catch(error){archiveError(error,res,next);}});
   app.post('/api/jobs/:jobId/restore',(req,res,next)=>{try{res.json(restoreJob(db,req.params.jobId));}catch(error){archiveError(error,res,next);}});
+  app.post('/api/jobs/:jobId/reset/:section',(req,res,next)=>{try{
+    const section=String(req.params.section) as JobResetSection;
+    if(!['rules','runs','results'].includes(section))return res.status(404).json({error:'reset_section_not_found'});
+    const active=db.prepare("SELECT id FROM gulu_tasks WHERE job_id=? AND status IN ('queued','running','paused','needs_attention')").all(req.params.jobId) as Array<{id:string}>;
+    active.forEach(({id})=>taskControllers.get(id)?.abort());
+    const result=resetJobSection(db,req.params.jobId,section);
+    if(!result)return res.status(404).json({error:'job_not_found'});
+    res.json(result);
+  }catch(error){next(error)}});
 
   app.post('/api/jobs', async (req, res, next) => {
     try {
@@ -146,6 +153,13 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
   app.post('/api/jobs/:jobId/rules/:version/approve', (req, res, next) => {
     try { res.json(approveVersion(db, req.params.jobId, Number(req.params.version))); } catch (error) { next(error); }
   });
+  app.post('/api/jobs/:jobId/rules/regenerate',async(req,res,next)=>{try{
+    const job=db.prepare('SELECT title,source_text,current_rule_version FROM jobs WHERE id=?').get(req.params.jobId) as {title:string;source_text:string;current_rule_version:number}|undefined;
+    if(!job)return res.status(404).json({error:'job_not_found'});
+    if(job.current_rule_version!==0)return res.status(409).json({error:'rules_already_exist'});
+    const safeSource=sanitizeTextForCloud(job.source_text);const base=makeDefaultJobPack(req.params.jobId,job.title,safeSource);
+    const generated=await generateInitialPack(base,safeSource);res.status(201).json(restoreDraft(db,req.params.jobId,generated));
+  }catch(error){next(error)}});
 
   app.get('/api/jobs/:jobId/changes',(req,res,next)=>{try{res.json({items:jobChanges.list(req.params.jobId)})}catch(error){next(error)}});
   app.post('/api/jobs/:jobId/changes',(req,res,next)=>{try{res.status(201).json(jobChanges.create(req.params.jobId,String(req.body?.text??'')))}catch(error){next(error)}});

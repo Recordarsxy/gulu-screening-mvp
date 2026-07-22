@@ -66,6 +66,37 @@ export function createDraft(db: DatabaseSync, input: { jobId: string; title: str
   }
 }
 
+export function restoreDraft(
+  db: DatabaseSync,
+  jobId: string,
+  input: JobPack,
+): JobPack {
+  const job = db
+    .prepare("SELECT current_rule_version FROM jobs WHERE id=?")
+    .get(jobId) as { current_rule_version: number } | undefined;
+  if (!job) throw new Error("job_not_found");
+  if (job.current_rule_version !== 0) throw new Error("rules_already_exist");
+  const pack = JobPackSchema.parse({
+    ...input,
+    job_id: jobId,
+    rule_version: 1,
+    approval: { status: "draft", approved_at: null },
+  });
+  validateRulePolicy(pack);
+  db.exec("BEGIN");
+  try {
+    db.prepare(
+      "INSERT INTO job_rule_versions(job_id,version,pack_json,status) VALUES (?,?,?,?)",
+    ).run(jobId, 1, JSON.stringify(pack), "draft");
+    db.prepare("UPDATE jobs SET current_rule_version=1 WHERE id=?").run(jobId);
+    db.exec("COMMIT");
+    return pack;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 export function getVersion(db: DatabaseSync, jobId: string, version: number): JobPack | null {
   const row = db.prepare('SELECT pack_json FROM job_rule_versions WHERE job_id=? AND version=?').get(jobId, version) as { pack_json: string } | undefined;
   return row ? JobPackSchema.parse(JSON.parse(row.pack_json)) : null;

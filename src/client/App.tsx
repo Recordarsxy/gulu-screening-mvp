@@ -9,6 +9,7 @@ import {
   type JobPack,
   type JobSummary,
   type ResultItem,
+  type ResetSection,
   type RunRecord,
 } from "./api.js";
 import { CampaignPanel } from "./CampaignPanel.js";
@@ -372,6 +373,77 @@ export function App() {
       setBusy(false);
     }
   };
+  const resetSection = async (section: ResetSection) => {
+    if (!selected) return;
+    const messages: Record<ResetSection, string> = {
+      rules:
+        "将清空规则、搜索方案、运行记录和候选结果。岗位名称与原始 JD 会保留。确定继续吗？",
+      runs:
+        "将清空搜索方案、运行任务、断点和策略记录。规则与候选结果会保留。确定继续吗？",
+      results:
+        "将清空候选人、DeepSeek 判断和人工复核。规则与运行历史会保留。确定继续吗？",
+    };
+    if (!window.confirm(messages[section])) return;
+    setBusy(true);
+    try {
+      const summary = await api.resetSection(selected, section);
+      if (section === "rules") {
+        setPack(null);
+        setPlan(null);
+        setCampaign(null);
+        setTask(null);
+        setTaskHistory([]);
+        setResults([]);
+        setChanges([]);
+        setDemo(null);
+        setResultsRunId("");
+      }
+      if (section === "runs") {
+        setPlan(null);
+        setCampaign(null);
+        setTask(null);
+        setTaskHistory([]);
+        setDemo(null);
+        setResultsRunId("");
+      }
+      if (section === "results") {
+        setResults([]);
+        setTask((current) =>
+          current && !terminalTask(current.status)
+            ? {
+                ...current,
+                status: "paused",
+                lastError: "候选结果已重置，任务已暂停",
+              }
+            : current,
+        );
+      }
+      await refreshJobs();
+      const total = Object.values(summary.deleted).reduce(
+        (sum, value) => sum + value,
+        0,
+      );
+      setNotice(`重置完成，共清理 ${total} 条记录。`);
+    } catch (e: any) {
+      setNotice(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const regenerateRules = async () => {
+    if (!selected) return;
+    setBusy(true);
+    setNotice("DeepSeek 正在根据保留的岗位资料重新生成规则…");
+    try {
+      setPack(await api.regenerateRules(selected));
+      setNotice("已重新生成规则 v1 草稿，请审核后批准。");
+      await refreshJobs();
+    } catch (e: any) {
+      setNotice(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
   const activeTask = Boolean(task && !terminalTask(task.status));
   const shown = useMemo(
     () =>
@@ -529,8 +601,32 @@ export function App() {
         )}
         {view === "rules" && (
           <section>
-            {!pack ? (
+            {!selected ? (
               <Empty text="请先选择岗位" />
+            ) : !pack ? (
+              <div className="panel reset-empty">
+                <div className="flow-head">
+                  <div>
+                    <span className="status">规则为空</span>
+                    <h2>规则已重置</h2>
+                  </div>
+                  <button
+                    className="danger"
+                    onClick={() => resetSection("rules")}
+                    disabled={busy}
+                  >
+                    重置规则与全部下游数据
+                  </button>
+                </div>
+                <p>岗位名称与原始 JD 仍然保留，可以让 DeepSeek 重新生成一份 v1 草稿。</p>
+                <button
+                  className="primary"
+                  onClick={regenerateRules}
+                  disabled={busy}
+                >
+                  重新生成规则
+                </button>
+              </div>
             ) : (
               <>
                 <div className="flow-head">
@@ -541,6 +637,13 @@ export function App() {
                     <h2>规则版本 v{pack.rule_version}</h2>
                   </div>
                   <div>
+                    <button
+                      className="danger"
+                      onClick={() => resetSection("rules")}
+                      disabled={busy}
+                    >
+                      重置规则与全部下游数据
+                    </button>
                     <a
                       className="button ghost"
                       href={`/api/jobs/${selected}/guide.docx`}
@@ -622,7 +725,17 @@ export function App() {
             {!selected ? (
               <Empty text="请先选择并批准一个岗位" />
             ) : (
-              <div className="settings-grid">
+              <>
+                <div className="section-actions">
+                  <button
+                    className="danger"
+                    onClick={() => resetSection("runs")}
+                    disabled={busy}
+                  >
+                    重置运行中心
+                  </button>
+                </div>
+                <div className="settings-grid">
                 <div className="panel">
                   <div className="panel-title">
                     <span className="step">真</span>
@@ -765,7 +878,8 @@ export function App() {
                     </>
                   )}
                 </div>
-              </div>
+                </div>
+              </>
             )}
           </section>
         )}
@@ -777,6 +891,7 @@ export function App() {
             filter={filter}
             setFilter={setFilter}
             runId={resultsRunId}
+            onReset={() => resetSection("results")}
             reload={() =>
               selected &&
               api
@@ -910,7 +1025,9 @@ function JobListItem({
         <span className={`status ${job.status}`}>
           {job.status === "approved"
             ? "已批准"
-            : `草稿 v${job.current_rule_version}`}
+            : job.status === "draft"
+              ? `草稿 v${job.current_rule_version}`
+              : "规则为空"}
         </span>
         <em>›</em>
       </button>
@@ -1286,6 +1403,7 @@ function Results({
   setFilter,
   runId,
   reload,
+  onReset,
 }: {
   selected: string;
   items: ResultItem[];
@@ -1294,6 +1412,7 @@ function Results({
   setFilter: (v: string) => void;
   runId: string;
   reload: () => void;
+  onReset: () => void;
 }) {
   if (!selected) return <Empty text="请先完成一次筛选" />;
   const counts = {
@@ -1332,6 +1451,9 @@ function Results({
           ))}
         </div>
         <div>
+          <button className="danger" onClick={onReset}>
+            清空候选结果
+          </button>
           <button className="ghost" onClick={reload}>
             刷新
           </button>

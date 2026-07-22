@@ -4,9 +4,15 @@ export type JobSummary = {
   current_rule_version: number;
   created_at: string;
   archived_at: string | null;
-  status: "draft" | "approved";
+  status: "draft" | "approved" | null;
 };
 export type JobPack = any;
+export type ResetSection = "rules" | "runs" | "results";
+export type ResetSummary = {
+  jobId: string;
+  section: ResetSection;
+  deleted: Record<string, number>;
+};
 export type ResultItem = {
   candidateId: string;
   name: string;
@@ -210,7 +216,11 @@ export const api = {
     if (!response.ok) throw new Error(data.error);
     return data as JobPack;
   },
-  getJob: (id: string) => json<{ job: any; pack: JobPack }>(`/api/jobs/${id}`),
+  getJob: (id: string) => json<{ job: any; pack: JobPack | null }>(`/api/jobs/${id}`),
+  resetSection: (id: string, section: ResetSection) =>
+    json<ResetSummary>(`/api/jobs/${id}/reset/${section}`, { method: "POST" }),
+  regenerateRules: (id: string) =>
+    json<JobPack>(`/api/jobs/${id}/rules/regenerate`, { method: "POST" }),
   revise: (id: string, pack: JobPack) =>
     json<JobPack>(`/api/jobs/${id}/rules`, {
       method: "PUT",
