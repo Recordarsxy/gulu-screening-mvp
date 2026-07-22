@@ -387,6 +387,7 @@ async function runOnce() {
     if (currentTask && !['task_not_running', 'task_aborted'].includes(message)) {
       const immediateAttention = [
         'filter_control_changed',
+        'filter_value_unresolved',
         'search_control_changed',
         'unsupported_page',
         'gulu_tab_unavailable',
