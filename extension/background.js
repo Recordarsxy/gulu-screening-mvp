@@ -46,7 +46,7 @@ async function api(path, init = {}) {
 async function send(tabId, operation, args = {}) {
   const response = await Promise.race([
     chrome.tabs.sendMessage(tabId, { operation, args }),
-    delay(5000).then(() => { throw new Error('adapter_timeout'); }),
+    delay(5000).then(() => { throw new Error(`adapter_timeout:${operation}`); }),
   ]);
   if (!response?.ok) throw new Error(response?.error ?? 'adapter_unavailable');
   return response.result;
@@ -373,6 +373,7 @@ async function runOnce() {
         'permission_denied',
         'candidate_scope_unavailable',
         'candidate_scope_not_all_talent',
+        'adapter_timeout',
       ].some((code) => message === code || message.startsWith(`${code}:`));
       await event(
         currentTask.id,

@@ -22,7 +22,7 @@ describe('Chrome extension safety boundary', () => {
 
   it('times out content-script messages instead of hanging forever',async()=>{
     const source=await readFile(new URL('../extension/background.js',import.meta.url),'utf8');
-    expect(source).toContain("throw new Error('adapter_timeout')");
+    expect(source).toContain('throw new Error(`adapter_timeout:${operation}`)');
     expect(source).toContain('delay(5000)');
     expect(source).toContain('Promise.race');
   });
