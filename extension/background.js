@@ -1,3 +1,5 @@
+import { commitComtreeValueInMainWorld } from './gulu-main-world.js';
+
 const SERVICE = 'http://127.0.0.1:4318';
 const GULU = 'http://121.43.105.7/crm#candidate/list?gql&page=1&savedSearchId=94096';
 let active = false;
@@ -50,6 +52,15 @@ async function send(tabId, operation, args = {}) {
   ]);
   if (!response?.ok) throw new Error(response?.error ?? 'adapter_unavailable');
   return response.result;
+}
+
+async function applyFilterValueOnTab(tabId, field, value) {
+  try { return await send(tabId, 'applyFilterValue', { field, value }); }
+  catch (error) {
+    if (!['cities','industries','functions'].includes(field)||!String(error?.message??error).startsWith(`filter_value_unresolved:${field}:`)) throw error;
+    const executed=await chrome.scripting.executeScript({target:{tabId},world: 'MAIN',func:commitComtreeValueInMainWorld,args:[field,String(value)]});
+    const result=executed[0]?.result;if(!result?.accepted)throw error;return result;
+  }
 }
 
 async function waitReady(tabId, context = 'page') {
@@ -155,7 +166,7 @@ async function restoreList(tabId, round, page, submit) {
   for (const field of ['keywords','companies','roles','cities','industries','functions']) {
     const values = Array.isArray(round.filters?.[field]) ? round.filters[field] : [];
     for (const value of values) {
-      await send(tabId, 'applyFilterValue', { field, value });
+      await applyFilterValueOnTab(tabId, field, value);
       await delay(600);
       const filterState = await waitReady(tabId, `filter-${field}`);
       if (filterState.state !== 'list') throw new Error(filterState.state);

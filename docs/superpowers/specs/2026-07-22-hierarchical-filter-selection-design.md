@@ -17,6 +17,14 @@
 3. 点击“确认”后必须验证控件已选文字不再是“请选择”，或隐藏提交值已变为非空。验证失败仍明确报 `filter_value_unresolved`。
 4. 不硬编码“游戏”的内部 ID，不跳过业务要求的行业条件，不改变 1–100 人读取窗口。
 
+## Chrome Execution Boundary
+
+真实页面进一步证实 jqTree 的业务选择事件在页面主环境中：真实点击 `Gaming 游戏` 会写入行业 ID `2201`，但 content script 隔离环境的合成点击不会触发该处理。因此：
+
+- 普通标签仍全部在 content script 中处理。
+- 只有 `cities` / `industries` / `functions` 已明确返回 `filter_value_unresolved` 时，后台才用 Chrome `MAIN` world 执行同一可见节点点击。
+- MAIN-world 函数仅能在三个已批准树字段内定位节点、确认并点击“添加”；它不读候选人资料，不接受 owner/type 字段，也不执行谷露写操作。
+
 ## Alternatives Rejected
 
 - 硬编码行业/职能 ID：依赖谷露内部字典，字典变化后容易再次失效。

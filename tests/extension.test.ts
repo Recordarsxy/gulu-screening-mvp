@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFile } from 'node:fs/promises';
 
 describe('Chrome extension safety boundary', () => {
+  it('uses the Chrome main world only as a hierarchical-filter fallback',async()=>{const manifest=JSON.parse(await readFile(new URL('../extension/manifest.json',import.meta.url),'utf8'));const source=await readFile(new URL('../extension/background.js',import.meta.url),'utf8');expect(manifest.permissions).toContain('scripting');expect(source).toContain("world: 'MAIN'");expect(source).toContain('commitComtreeValueInMainWorld');});
   it('uses stable event IDs and reconstructs list state after restart', async () => {
     const source=await readFile(new URL('../extension/background.js',import.meta.url),'utf8');
     expect(source).toContain('candidate:${task.id}:${task.currentRound}:${seed.guluId}');
@@ -110,8 +111,8 @@ describe('Chrome extension safety boundary', () => {
   it('uses Manifest V3 with no sensitive browser permissions', async () => {
     const manifest = JSON.parse(await readFile(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
     expect(manifest.manifest_version).toBe(3);
-    for (const permission of ['cookies','downloads','history','webRequest','scripting']) expect(manifest.permissions || []).not.toContain(permission);
-    expect(manifest.permissions).toEqual(expect.arrayContaining(['tabs','storage','alarms']));
+    for (const permission of ['cookies','downloads','history','webRequest']) expect(manifest.permissions || []).not.toContain(permission);
+    expect(manifest.permissions).toEqual(expect.arrayContaining(['tabs','storage','alarms','scripting']));
     expect(manifest.host_permissions).toEqual(['http://121.43.105.7/*','http://127.0.0.1/*']);
     expect(manifest.content_scripts[0].matches).toEqual(['http://121.43.105.7/*']);
     expect(manifest.content_scripts[0].js).toEqual(['gulu-adapter.js','content.js']);

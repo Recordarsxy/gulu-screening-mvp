@@ -3,7 +3,7 @@
   "name": "谷露只读后台连接器",
   "version": "1.3.0",
   "description": "连接本机筛选服务，在后台只读执行已确认的谷露搜索计划。",
-  "permissions": ["tabs", "storage", "alarms"],
+  "permissions": ["tabs", "storage", "alarms", "scripting"],
   "host_permissions": ["http://121.43.105.7/*", "http://127.0.0.1/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "content_scripts": [{ "matches": ["http://121.43.105.7/*"], "js": ["gulu-adapter.js", "content.js"], "run_at": "document_idle" }],

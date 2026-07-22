@@ -4,7 +4,7 @@
 
 **Goal:** Make real Gulu hierarchical filters select visible second-level nodes even when their checkbox HTML value is empty.
 
-**Architecture:** Keep hierarchical selection inside `applyFilterValue`. Match a visible tree title by business text, click its associated checkbox without relying on HTML value, confirm, then validate the selected control state before submitting the filter.
+**Architecture:** Keep ordinary selection inside `applyFilterValue`. If an approved city/industry/function tree remains unresolved, use a narrowly scoped Chrome MAIN-world fallback to trigger the page's jqTree handler, then validate the selected control state before submitting the filter.
 
 **Tech Stack:** Chrome Extension JavaScript, JSDOM, Vitest, TypeScript
 
