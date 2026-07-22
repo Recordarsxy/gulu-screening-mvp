@@ -6,8 +6,16 @@ const emptyFilters=():GuluFilters=>({keywords:[],companies:[],roles:[],cities:[]
 const dimensions=(filters:GuluFilters)=>fields.filter(field=>filters[field].length>0).length;
 const includesFilters=(candidate:GuluFilters,current:GuluFilters)=>fields.every(field=>current[field].every(value=>candidate[field].includes(value)));
 
+export function broadenRoleSearchTerm(value:string):string{
+  const exact=value.trim().replace(/\s+/g,' ');if(!exact)return exact;
+  const leadershipCore=exact.replace(/(?:部)?(?:副)?总经理$|(?:副)?总监$|负责人$|主管$/u,'').replace(/部$/u,'').trim();
+  if(leadershipCore!==exact&&leadershipCore.length>=2)return leadershipCore;
+  const managerCore=exact.replace(/经理$/u,'').trim();
+  return managerCore!==exact&&managerCore.length>=4?managerCore:exact;
+}
+
 export function atomicSearchFilters(filters:GuluFilters):GuluFilters{
-  return Object.fromEntries(Object.entries(filters).map(([field,values])=>[field,values.slice(0,1)])) as GuluFilters;
+  return Object.fromEntries(Object.entries(filters).map(([field,values])=>[field,values.slice(0,1).map(value=>field==='roles'?broadenRoleSearchTerm(value):value)])) as GuluFilters;
 }
 
 export type AdaptiveProbeDecision={action:'read'|'refine'|'next_step';filters:GuluFilters;rationale:'bounded_result_set'|'result_set_too_large'|'empty_combination'|'combinations_exhausted'};
@@ -19,7 +27,7 @@ function enumerateCombinations(campaign:GuluSearchCampaign,seedStepId:string):Gu
   const base=atomicSearchFilters(seed.filters);
   const options:Array<{field:keyof GuluFilters;value:string}>=[];
   for(const field of fields)for(const step of [...campaign.steps].sort((a,b)=>a.order-b.order))for(const value of step.filters[field]){
-    const clean=value.trim();if(!clean||base[field].includes(clean)||options.some(item=>item.field===field&&item.value===clean))continue;options.push({field,value:clean});
+    const clean=field==='roles'?broadenRoleSearchTerm(value):value.trim();if(!clean||base[field].includes(clean)||options.some(item=>item.field===field&&item.value===clean))continue;options.push({field,value:clean});
   }
   const output:GuluFilters[]=[base];
   for(const option of options){const next={...emptyFilters(),...structuredClone(base)};next[option.field]=[option.value];output.push(next)}

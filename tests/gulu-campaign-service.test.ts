@@ -46,7 +46,7 @@ describe('Gulu campaign service',()=>{
   });
   it('persists broad, bounded and empty adaptive probe decisions',()=>{
     const {service}=setup();service.saveCampaign(draft);service.confirmCampaign('job-1','campaign-1',draft);const task=service.startCampaignTask('job-1','campaign-1');service.completePreflight(task.id);
-    const broad=service.recordStepProbe(task.id,'company-seed',374);expect(broad).toMatchObject({action:'refine',resultCount:374,step:{filters:{companies:['阿里云'],roles:['海外销售经理']}}});
+    const broad=service.recordStepProbe(task.id,'company-seed',374);expect(broad).toMatchObject({action:'refine',resultCount:374,step:{filters:{companies:['阿里云'],roles:['海外销售']}}});
     const bounded=service.recordStepProbe(task.id,'company-seed',42);expect(bounded).toMatchObject({action:'read',resultCount:42});
     const empty=service.recordStepProbe(task.id,'company-seed',0);expect(empty.action).toBe('next_step');expect(empty.task).toMatchObject({currentStepId:'role-cluster'});
     expect(service.getTaskStrategy(task.id).decisions.filter((item:any)=>item.action==='probe')).toHaveLength(3);
