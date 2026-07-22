@@ -102,12 +102,16 @@ async function waitListSettled(tabId, expectedPage, { minimumDelay = 0, previous
   const started = Date.now();
   let stableSignature = null;
   let stableCount = 0;
+  let zeroCount = 0;
   let lastState = null;
   for (let attempt = 0; attempt < 150; attempt += 1) {
     await delay(400);
     const state = await send(tabId, 'inspectListState');
     lastState = state;
     const changed = state.empty || previousSignature === null || state.signature !== previousSignature;
+    const stableZero = !state.loading && state.queryReady && state.page === expectedPage && state.count === 0 && Date.now() - started >= minimumDelay;
+    zeroCount = stableZero ? zeroCount + 1 : 0;
+    if (zeroCount >= 10) return { ...state, empty: true, resultReady: true, inferredEmpty: true };
     if (!state.loading && state.queryReady && state.resultReady && state.page === expectedPage && changed && Date.now() - started >= minimumDelay) {
       stableCount = state.signature === stableSignature ? stableCount + 1 : 1;
       stableSignature = state.signature;

@@ -68,6 +68,8 @@ describe('Chrome extension safety boundary', () => {
     const source=await readFile(new URL('../extension/background.js',import.meta.url),'utf8');
     expect(source).toContain('attempt < 150');
     expect(source).toContain('state.resultReady');
+    expect(source).toContain('zeroCount >= 10');
+    expect(source).toContain('inferredEmpty: true');
     expect(source).toContain('list_not_settled:page=');
     expect(source).toContain('queryReady=${Boolean(lastState?.queryReady)}');
   });
