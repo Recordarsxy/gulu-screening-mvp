@@ -3,7 +3,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const port = process.env.PORT || '4318';
 const localUrl = `http://127.0.0.1:${port}`;
-const expectedVersion = '1.2.0';
+const expectedVersion = '1.3.0';
 
 async function healthPayload() {
   try {
@@ -30,7 +30,7 @@ function openLocalUrl() {
 
 const existing = await healthPayload();
 if (existing && existing.version !== expectedVersion) {
-  throw new Error(`4318 端口正在运行版本 ${existing.version ?? '未知'}。请先关闭旧版本服务窗口，再重新双击 v1.2 启动器。`);
+  throw new Error(`4318 端口正在运行版本 ${existing.version ?? '未知'}。请先关闭旧版本服务窗口，再重新双击 v1.3 启动器。`);
 }
 if (existing?.version === expectedVersion) {
   openLocalUrl();

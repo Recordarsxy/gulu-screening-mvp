@@ -16,7 +16,7 @@ describe('Windows delivery', () => {
     expect(launcher).toContain('if not exist node_modules\\.bin\\vite.cmd');
     expect(start).toContain("spawn('explorer.exe', [localUrl]");
     expect(start).toContain('if (await isHealthy())');
-    expect(start).toContain("const expectedVersion = '1.2.0'");
+    expect(start).toContain("const expectedVersion = '1.3.0'");
     expect(start).toContain('payload.version === expectedVersion');
     expect(start).toContain('请先关闭旧版本服务窗口');
     expect(start).toContain('openLocalUrl();');
@@ -36,5 +36,6 @@ describe('Windows delivery', () => {
     expect(JSON.parse(await readFile(new URL('../extension/manifest.json',import.meta.url),'utf8')).version).toBe('1.3.0');
     expect(await readFile(new URL('../src/server/app.ts',import.meta.url),'utf8')).toContain("version: '1.3.0'");
     expect(await readFile(new URL('../src/client/App.tsx',import.meta.url),'utf8')).toContain('GULU SCREENING v1.3.0');
+    expect(await readFile(new URL('../scripts/start.mjs',import.meta.url),'utf8')).toContain("expectedVersion = '1.3.0'");
   });
 });
