@@ -83,7 +83,7 @@ describe('Chrome extension safety boundary', () => {
     for (const permission of ['cookies','downloads','history','webRequest','scripting']) expect(manifest.permissions || []).not.toContain(permission);
     expect(manifest.permissions).toEqual(expect.arrayContaining(['tabs','storage','alarms']));
     expect(manifest.host_permissions).toEqual(['http://121.43.105.7/*','http://127.0.0.1/*']);
-    expect(manifest.content_scripts[0].matches).toEqual(['http://121.43.105.7/crm*']);
+    expect(manifest.content_scripts[0].matches).toEqual(['http://121.43.105.7/*']);
   });
 
   it('exposes only semantic read operations and strips forbidden fields', async () => {

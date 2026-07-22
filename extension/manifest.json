@@ -6,7 +6,7 @@
   "permissions": ["tabs", "storage", "alarms"],
   "host_permissions": ["http://121.43.105.7/*", "http://127.0.0.1/*"],
   "background": { "service_worker": "background.js", "type": "module" },
-  "content_scripts": [{ "matches": ["http://121.43.105.7/crm*"], "js": ["content.js"], "run_at": "document_idle" }],
+  "content_scripts": [{ "matches": ["http://121.43.105.7/*"], "js": ["content.js"], "run_at": "document_idle" }],
   "web_accessible_resources": [{ "resources": ["gulu-adapter.js"], "matches": ["http://121.43.105.7/*"] }],
   "action": { "default_title": "谷露只读后台连接器", "default_popup": "popup.html" }
 }
