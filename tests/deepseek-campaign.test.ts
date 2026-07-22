@@ -102,6 +102,7 @@ describe("DeepSeek adaptive campaign behavior", () => {
       outputTokens: 10,
     });
   });
+  it("normalizes the field names returned by the live DeepSeek search-fit model",async()=>{const provider=new DeepSeekProvider({apiKey:"test",fetcher:async()=>response({search_fit:20,matched_evidence:[],information_gaps:["海外B2B经验","明确业绩"]})});const pack=makeDefaultJobPack("job-1","海外销售","JD");await expect(provider.scoreSearchFit(pack,{currentCompany:"示例公司",currentRole:"大客户经理",experiences:[]})).resolves.toMatchObject({score:20,evidence:["未发现明确命中证据"],gaps:["海外B2B经验","明确业绩"],model:"deepseek-test"});});
   it("repairs empty or duplicate model steps with approved-rule fallbacks", async () => {
     const provider = new DeepSeekProvider({
       apiKey: "test",

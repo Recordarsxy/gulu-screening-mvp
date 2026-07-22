@@ -621,11 +621,16 @@ export class DeepSeekProvider {
       },
       signal,
     );
+    const raw=result.data as Record<string,unknown>;
+    const evidenceInput=raw.evidence??raw.matched_evidence;
+    const gapsInput=raw.gaps??raw.information_gaps;
+    const normalized={score:Number(raw.score??raw.search_fit),evidence:(Array.isArray(evidenceInput)?evidenceInput.map(String):typeof evidenceInput==='string'?[evidenceInput]:[]).filter(Boolean).slice(0,4),gaps:(Array.isArray(gapsInput)?gapsInput.map(String):typeof gapsInput==='string'?[gapsInput]:[]).filter(Boolean).slice(0,6)};
+    if(!normalized.evidence.length)normalized.evidence=['未发现明确命中证据'];
     const parsed = GuluSearchFitSchema.omit({
       model: true,
       inputTokens: true,
       outputTokens: true,
-    }).parse(result.data);
+    }).parse(normalized);
     return {
       ...parsed,
       model: result.model,
