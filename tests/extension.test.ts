@@ -98,6 +98,8 @@ describe('Chrome extension safety boundary', () => {
     const adapter=await readFile(new URL('../extension/gulu-adapter.js',import.meta.url),'utf8');
     const reset=adapter.slice(adapter.indexOf('async function resetFilters'),adapter.indexOf('async function applyFilters'));
     expect(reset).not.toContain('label?.click()');
+    const apply=adapter.slice(adapter.indexOf('async function applyFilters'),adapter.indexOf('function readList'));
+    expect(apply).not.toContain("new KeyboardEvent('keydown'");
   });
 
   it('uses Manifest V3 with no sensitive browser permissions', async () => {
