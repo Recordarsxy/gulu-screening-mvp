@@ -70,6 +70,7 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
     }
     if(type==='failure') return res.json(gulu.recordFailure(taskId,String(req.body?.error??'connector_failure')));
     if(type==='preflight_completed')return res.json(gulu.completePreflight(taskId));
+    if(type==='step_probed'){const stepId=String(req.body?.stepId??'');const resultCount=Number(req.body?.resultCount);if(!stepId||stepId!==gulu.getTask(taskId).currentStepId||!Number.isInteger(resultCount)||resultCount<0)return res.status(400).json({error:'invalid_probe'});return res.json(gulu.recordStepProbe(taskId,stepId,resultCount));}
     if(type==='step_started'){const stepId=String(req.body?.stepId??'');if(!stepId||stepId!==gulu.getTask(taskId).currentStepId)return res.status(400).json({error:'invalid_step'});return res.json(gulu.startStep(taskId,stepId));}
     if(type==='step_calibrated'){
       const stepId=String(req.body?.stepId??'');const task=gulu.getTask(taskId);const progress=task.stepProgress.find(item=>item.stepId===stepId);if(!progress)return res.status(400).json({error:'invalid_step'});

@@ -23,5 +23,7 @@ describe('adaptive campaign API',()=>{
     const confirmed=await request(`/api/jobs/job-1/gulu-campaigns/${generated.data.id}/confirm`,{method:'PUT',body:JSON.stringify(generated.data)});expect(confirmed.status).toBe(200);expect(confirmed.data.status).toBe('confirmed');
     const task=await request('/api/jobs/job-1/runs/gulu',{method:'POST',body:JSON.stringify({campaignId:generated.data.id,fresh:true})});expect(task.status).toBe(201);expect(task.data).toMatchObject({campaignId:generated.data.id,phase:'preflight',currentStepId:confirmed.data.steps[0].id});
     const strategy=await request(`/api/runs/${task.data.id}/strategy`);expect(strategy.status).toBe(200);expect(strategy.data).toMatchObject({campaign:{id:generated.data.id},task:{id:task.data.id}});expect(strategy.data.steps).toHaveLength(confirmed.data.steps.length);
+    const pairing=await request('/api/connectors/gulu/pairing',{method:'POST'});const redeemed=await request('/api/connector/gulu/pairing/redeem',{method:'POST',body:JSON.stringify({code:pairing.data.code,extensionVersion:'1.3.0'})});
+    const probed=await request(`/api/connector/gulu/tasks/${task.data.id}/events`,{method:'POST',headers:{authorization:`Bearer ${redeemed.data.token}`},body:JSON.stringify({eventId:'probe-1',type:'step_probed',stepId:task.data.currentStepId,resultCount:374,filters:confirmed.data.steps[0].filters})});expect(probed.status).toBe(200);expect(probed.data).toMatchObject({action:'refine',resultCount:374,step:{filters:{roles:expect.any(Array)}}});
   });
 });

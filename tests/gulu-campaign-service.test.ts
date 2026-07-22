@@ -37,4 +37,11 @@ describe('Gulu campaign service',()=>{
     expect(service.filterUnseen(task.id,['G-1','G-2','G-2'])).toEqual(['G-2']);
     service.updateCheckpoint(task.id,{page:2,candidateCursor:3});expect(service.getTaskSteps(task.id)[0]).toMatchObject({page:2,candidateCursor:3});
   });
+  it('persists broad, bounded and empty adaptive probe decisions',()=>{
+    const {service}=setup();service.saveCampaign(draft);service.confirmCampaign('job-1','campaign-1',draft);const task=service.startCampaignTask('job-1','campaign-1');service.completePreflight(task.id);
+    const broad=service.recordStepProbe(task.id,'company-seed',374);expect(broad).toMatchObject({action:'refine',resultCount:374,step:{filters:{companies:['阿里云'],roles:['海外销售经理']}}});
+    const bounded=service.recordStepProbe(task.id,'company-seed',42);expect(bounded).toMatchObject({action:'read',resultCount:42});
+    const empty=service.recordStepProbe(task.id,'company-seed',0);expect(empty.action).toBe('next_step');expect(empty.task).toMatchObject({currentStepId:'role-cluster'});
+    expect(service.getTaskStrategy(task.id).decisions.filter((item:any)=>item.action==='probe')).toHaveLength(3);
+  });
 });
