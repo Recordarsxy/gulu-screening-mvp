@@ -163,6 +163,19 @@ describe("DeepSeek adaptive campaign behavior", () => {
         .size,
     ).toBe(result.data.steps.length);
   });
+  it("adds an approved role direction when the model returns only company steps",async()=>{
+    const provider=new DeepSeekProvider({apiKey:"test",fetcher:async()=>response({summary:"company only",targetShortlist:10,steps:[
+      step("seed_company","funds",{companies:["Alpha Fund","Beta Fund"]}),
+      step("seed_company","banks",{companies:["Alpha Bank","Beta Bank"]}),
+      step("seed_company","brokers",{companies:["Alpha Securities"]}),
+      step("seed_company","insurers",{companies:["Alpha Insurance"]}),
+    ]})});
+    const pack=makeDefaultJobPack("job-fund","Sales General Manager","JD");
+    pack.roles.exact=["Sales General Manager"];
+    pack.roles.synonyms=["Institutional Sales Director"];
+    const result=await provider.generateGuluCampaign(pack);
+    expect(result.data.steps.some((item)=>item.filters.roles.length>0)).toBe(true);
+  });
   it("returns a constrained runtime decision with company-only additions", async () => {
     const provider = new DeepSeekProvider({
       apiKey: "test",

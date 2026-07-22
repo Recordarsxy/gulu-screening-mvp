@@ -552,6 +552,32 @@ export class DeepSeekProvider {
         values: pack.constraints.hard,
       },
     ];
+    const roleFallback = fallbacks.find(
+      (fallback) => fallback.field === "roles" && fallback.values.length > 0,
+    );
+    if (roleFallback && !steps.some((step) => step.filters.roles.length > 0)) {
+      if (steps.length >= 8) {
+        const removed = steps.pop();
+        if (removed) seen.delete(searchFingerprint(removed.filters));
+      }
+      const filters = {
+        ...empty,
+        roles: roleFallback.values.map((value) => value.trim()).filter(Boolean),
+      };
+      add(
+        buildStep(
+          {
+            type: roleFallback.type,
+            title: roleFallback.title,
+            objective: `验证${roleFallback.title}`,
+            rationale: "自动补充已批准职位方向，确保宽结果可增加筛选维度",
+            filters,
+            limit: 20,
+          },
+          steps.length,
+        ),
+      );
+    }
     for (const fallback of fallbacks) {
       if (steps.length >= 4) break;
       const filters = {
