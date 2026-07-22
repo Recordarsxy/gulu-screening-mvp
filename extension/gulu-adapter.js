@@ -3,7 +3,7 @@ const allowed=Object.freeze(['guluId','name','detailUrl','company','role','city'
 function sanitizeSnapshot(input){const output={};for(const key of allowed)if(input[key]!==undefined)output[key]=input[key];output.experiences=Array.isArray(output.experiences)?output.experiences:[];output.education=Array.isArray(output.education)?output.education:[];output.tags=Array.isArray(output.tags)?output.tags:[];for(const key of ['company','role','city','industry','function','salary'])output[key]=String(output[key]??'').slice(0,500);return output;}
 const clean=(value)=>String(value??'').replace(/\s+/g,' ').trim();
 const confirmedAllTalent=new WeakMap();
-const hasExplicitEmpty=(doc)=>/\u6682\u65e0(?:\u6570\u636e|\u8bb0\u5f55)?|\u65e0\u6570\u636e|\u6ca1\u6709.*\u6570\u636e/.test(clean(doc.body?.innerText??doc.body?.textContent));
+const hasExplicitEmpty=(doc)=>/暂无(?:数据|记录|人才|候选人?|搜索结果)?|无数据|没有(?:找到)?(?:符合[^。；]{0,30})?(?:数据|人才|候选人?|搜索结果)|未找到(?:符合[^。；]{0,30})?(?:人才|候选人?|结果)|搜索结果为空|共\s*0\s*条|0\s*(?:位|个)\s*(?:人才|候选人?)/.test(clean(doc.body?.innerText??doc.body?.textContent));
 const visible=(element)=>Boolean(element&&element.getClientRects().length&&getComputedStyle(element).display!=='none'&&getComputedStyle(element).visibility!=='hidden');
 const tick=(ms)=>new Promise((resolve)=>setTimeout(resolve,ms));
 const semanticFilterLabels=[['关键字','关键词'],['公司','公司名称'],['职位','职位名称'],['所在城市','城市','工作地点'],['行业'],['职能']];
