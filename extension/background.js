@@ -1,5 +1,5 @@
 const SERVICE = 'http://127.0.0.1:4318';
-const GULU = 'http://121.43.105.7/crm#candidate/list';
+const GULU = 'http://121.43.105.7/crm#candidate/list?gql&page=1&savedSearchId=94096';
 let active = false;
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -141,6 +141,8 @@ async function restoreList(tabId, round, page, submit) {
   }
   const scope = scopeChange.changed ? { scope: 'all_talent' } : await send(tabId, 'inspectCandidateScope');
   if (scope.scope !== 'all_talent') throw new Error('candidate_scope_not_all_talent');
+  const forbidden = await send(tabId, 'inspectForbiddenFilters');
+  if (!forbidden.safe) throw new Error(`forbidden_search_scope:${forbidden.filters.join(',')}`);
 
   await send(tabId, 'resetFilters');
   const beforeQuery = await send(tabId, 'inspectListState');
@@ -393,6 +395,7 @@ async function runOnce() {
         'permission_denied',
         'candidate_scope_unavailable',
         'candidate_scope_not_all_talent',
+        'forbidden_search_scope',
         'adapter_timeout',
       ].some((code) => message === code || message.startsWith(`${code}:`));
       await event(

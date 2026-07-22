@@ -92,6 +92,9 @@ describe('Chrome extension safety boundary', () => {
     expect(background).toContain("'lastTaskId'");
     expect(background).toContain('saved.lastTaskId !== task.id');
     expect(background).toContain("chrome.storage.local.set({ lastTaskId: task.id })");
+    expect(background).toContain("savedSearchId=94096");
+    expect(background).not.toContain("savedSearchId=94094");
+    expect(background.indexOf("await send(tabId, 'inspectForbiddenFilters')")).toBeLessThan(background.indexOf("await send(tabId, 'resetFilters')"));
     expect(background.indexOf("await send(tabId, 'inspectCandidateScope')")).toBeLessThan(background.indexOf("await send(tabId, 'resetFilters')"));
     expect(background).toContain("scopeChange.changed ? { scope: 'all_talent' }");
     expect(background).toContain("scope.scope !== 'all_talent'");
@@ -117,7 +120,7 @@ describe('Chrome extension safety boundary', () => {
 
   it('exposes only semantic read operations and strips forbidden fields', async () => {
     const adapter = await import('../extension/gulu-adapter-module.js');
-    expect(adapter.SEMANTIC_OPERATIONS).toEqual(['inspectState','inspectCandidateScope','ensureAllTalentScope','inspectListState','resetFilters','applyFilters','applyFilterValue','submitSearch','readList','openDetail','readDetail','nextPage']);
+    expect(adapter.SEMANTIC_OPERATIONS).toEqual(['inspectState','inspectCandidateScope','ensureAllTalentScope','inspectForbiddenFilters','inspectListState','resetFilters','applyFilters','applyFilterValue','submitSearch','readList','openDetail','readDetail','nextPage']);
     const safe=adapter.sanitizeSnapshot({guluId:'1',name:'甲',detailUrl:'http://121.43.105.7/crm#candidate/detail?id=1',company:'示例',role:'经理',phone:'13800000000',email:'a@b.com',notes:'秘密',sourceRound:'role',page:1,capturedAt:new Date().toISOString()});
     expect(safe).not.toHaveProperty('phone');expect(safe).not.toHaveProperty('email');expect(safe).not.toHaveProperty('notes');
     expect(Object.keys(safe).sort()).toEqual(expect.arrayContaining(['guluId','name','detailUrl','company','role']));

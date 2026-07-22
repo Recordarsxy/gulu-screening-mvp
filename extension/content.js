@@ -10,6 +10,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.operation === 'inspectState') result = adapter.inspectState();
       if (message.operation === 'inspectCandidateScope') result = adapter.inspectCandidateScope();
       if (message.operation === 'ensureAllTalentScope') result = adapter.ensureAllTalentScope();
+      if (message.operation === 'inspectForbiddenFilters') result = adapter.inspectForbiddenFilters();
       if (message.operation === 'inspectListState') result = adapter.inspectListState();
       if (message.operation === 'resetFilters') result = await adapter.resetFilters();
       if (message.operation === 'applyFilters') result = await adapter.applyFilters(args.filters ?? {}, { submit:Boolean(args.submit), reset:args.reset !== false });
