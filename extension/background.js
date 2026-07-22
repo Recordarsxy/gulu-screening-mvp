@@ -215,7 +215,8 @@ async function runCampaignTask({ task, campaign, steps, step }) {
   const unseen = new Set(checked.unseen);
   let cursor = progress.candidateCursor;
   let added = 0;
-  const target = task.phase === 'calibration' ? Math.min(5, step.limit) : step.limit;
+  const calibrating = task.phase === 'calibration' || progress.status === 'pending' || progress.status === 'calibrating';
+  const target = calibrating ? Math.min(5, step.limit) : step.limit;
   while (cursor < list.length && progress.readCount + added < target) {
     const seed = list[cursor];
     if (unseen.has(seed.guluId)) {
@@ -240,7 +241,7 @@ async function runCampaignTask({ task, campaign, steps, step }) {
     await pace();
   }
   const read = progress.readCount + added;
-  if (task.phase === 'calibration' && read >= 5) {
+  if (calibrating && read >= 5) {
     await event(task.id, 'step_calibrated', { stepId: step.id, exhausted: false }, `step-calibrated:${task.id}:${step.id}`);resumeSoon();return;
   }
   if (read >= step.limit || task.readCount + added >= campaign.maxUniqueCandidates) {
@@ -248,7 +249,7 @@ async function runCampaignTask({ task, campaign, steps, step }) {
   }
   const hasNext = await send(tab.id, 'nextPage');
   if (hasNext) await event(task.id, 'checkpoint', { checkpoint: { page: progress.page + 1, candidateCursor: 0 } }, `page:${task.id}:${step.id}:${progress.page + 1}`);
-  else if (task.phase === 'calibration') await event(task.id, 'step_calibrated', { stepId: step.id, exhausted: true }, `step-calibrated:${task.id}:${step.id}`);
+  else if (calibrating) await event(task.id, 'step_calibrated', { stepId: step.id, exhausted: true }, `step-calibrated:${task.id}:${step.id}`);
   else await event(task.id, 'step_completed', { stepId: step.id, empty: false }, `step-complete:${task.id}:${step.id}`);
   resumeSoon();
 }
