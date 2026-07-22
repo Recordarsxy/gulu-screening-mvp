@@ -116,6 +116,7 @@ describe("DeepSeek adaptive campaign behavior", () => {
               objective: "验证公司",
               rationale: "目标公司",
               limit: 20,
+              filters: {},
               keywords: ["vibe coding"],
               companies: ["阿里云"],
               roles: ["海外销售经理"],

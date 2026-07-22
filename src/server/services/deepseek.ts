@@ -423,18 +423,23 @@ export class DeepSeekProvider {
       functions: [],
     };
     const buildStep = (item: Record<string, unknown>, index: number) => {
-      const rawFilters = (
-        item.filters && typeof item.filters === "object" ? item.filters : item
+      const nestedFilters = (
+        item.filters && typeof item.filters === "object" ? item.filters : {}
       ) as Record<string, unknown>;
       const normalizedFilters = Object.fromEntries(
         Object.entries(empty).map(([key]) => [
           key,
-          Array.isArray(rawFilters[key])
-            ? rawFilters[key]
+          Array.isArray(nestedFilters[key]) && nestedFilters[key].length
+            ? nestedFilters[key]
                 .map(String)
                 .map((value) => value.trim())
                 .filter(Boolean)
-            : [],
+            : Array.isArray(item[key])
+              ? item[key]
+                  .map(String)
+                  .map((value) => value.trim())
+                  .filter(Boolean)
+              : [],
         ]),
       ) as typeof empty;
       const inferredType = normalizedFilters.companies.length
