@@ -25,6 +25,7 @@ describe('Chrome extension safety boundary', () => {
     expect(source).toContain('throw new Error(`adapter_timeout:${operation}`)');
     expect(source).toContain('delay(5000)');
     expect(source).toContain('Promise.race');
+    expect(source).toContain('gulu_tab_unavailable:${context}:');
   });
 
   it('keeps heartbeats alive while a long connector operation is active',async()=>{
@@ -74,12 +75,12 @@ describe('Chrome extension safety boundary', () => {
   it('reloads the neutral candidate list before applying each search plan',async()=>{
     const source=await readFile(new URL('../extension/background.js',import.meta.url),'utf8');
     const restore=source.slice(source.indexOf('async function restoreList'),source.indexOf('async function runCampaignTask'));
-    expect(restore).toContain('let state = await waitReady(tabId);');
+    expect(restore).toContain("let state = await waitReady(tabId, 'restore');");
     expect(source).toContain("chrome.tabs.update(tabId, { url: GULU }).catch(() => {});");
     expect(source).not.toContain("await chrome.tabs.update(tabId, { url: GULU });");
     expect(source).toContain('chrome.tabs.reload(tabId).catch(() => {});');
     expect(source).not.toContain('await chrome.tabs.reload(tabId);');
-    expect(restore.indexOf('chrome.tabs.reload(tabId)')).toBeLessThan(restore.indexOf('await waitReady(tabId)'));
+    expect(restore.indexOf('chrome.tabs.reload(tabId)')).toBeLessThan(restore.indexOf("await waitReady(tabId, 'restore')"));
     expect(source.indexOf('chrome.tabs.reload(tabId).catch(() => {});')).toBeLessThan(source.indexOf("await send(tabId, 'applyFilters'"));
   });
 

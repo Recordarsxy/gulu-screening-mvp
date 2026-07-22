@@ -52,16 +52,17 @@ async function send(tabId, operation, args = {}) {
   return response.result;
 }
 
-async function waitReady(tabId) {
+async function waitReady(tabId, context = 'page') {
+  let lastError = null;
   for (let i = 0; i < 30; i += 1) {
     await delay(500);
     try {
       const state = await send(tabId, 'inspectState');
       if (state.state === 'loading') continue;
       return state;
-    } catch {}
+    } catch (error) { lastError = String(error?.message ?? error).slice(0, 120); }
   }
-  throw new Error('gulu_tab_unavailable');
+  throw new Error(`gulu_tab_unavailable:${context}:${lastError ?? 'no_response'}`);
 }
 
 async function ensureTab() {
@@ -124,14 +125,14 @@ async function restoreList(tabId, round, page, submit) {
   await delay(500);
   chrome.tabs.reload(tabId).catch(() => {});
   await delay(500);
-  let state = await waitReady(tabId);
+  let state = await waitReady(tabId, 'restore');
   if (state.state === 'login_required' || state.state === 'captcha') return state;
   if (state.state !== 'list') throw new Error('unsupported_page');
 
   const scopeChange = await send(tabId, 'ensureAllTalentScope');
   if (scopeChange.changed) {
     await delay(1000);
-    const scopeState = await waitReady(tabId);
+    const scopeState = await waitReady(tabId, 'scope');
     if (scopeState.state !== 'list') throw new Error(scopeState.state);
   }
   const scope = scopeChange.changed ? { scope: 'all_talent' } : await send(tabId, 'inspectCandidateScope');
@@ -194,7 +195,7 @@ async function runCampaignTask({ task, campaign, steps, step }) {
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const detail = await chrome.tabs.create({ url: seed.detailUrl, active: false });
         try {
-          const detailState = await waitReady(detail.id);if (detailState.state !== 'detail') throw new Error(detailState.state);
+          const detailState = await waitReady(detail.id, 'detail');if (detailState.state !== 'detail') throw new Error(detailState.state);
           const snapshot = await send(detail.id, 'readDetail', { seed, sourceRound: 'campaign', sourceStepId: step.id, page: progress.page });
           await event(task.id, 'candidate', { snapshot: { ...snapshot, sourceRound: 'campaign', sourceStepId: step.id } }, campaignCandidateEventId(task, step, seed));
           lastError = null;added += 1;break;
@@ -290,7 +291,7 @@ async function runOnce() {
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const detail = await chrome.tabs.create({ url: seed.detailUrl, active: false });
         try {
-          const detailState = await waitReady(detail.id);
+          const detailState = await waitReady(detail.id, 'detail');
           if (detailState.state !== 'detail') throw new Error(detailState.state);
           const snapshot = await send(detail.id, 'readDetail', {
             seed,
