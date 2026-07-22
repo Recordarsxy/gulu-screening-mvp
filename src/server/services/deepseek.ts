@@ -424,7 +424,7 @@ export class DeepSeekProvider {
     };
     const buildStep = (item: Record<string, unknown>, index: number) => {
       const rawFilters = (
-        item.filters && typeof item.filters === "object" ? item.filters : {}
+        item.filters && typeof item.filters === "object" ? item.filters : item
       ) as Record<string, unknown>;
       const filters = Object.fromEntries(
         Object.entries(empty).map(([key]) => [
@@ -528,7 +528,7 @@ export class DeepSeekProvider {
       },
     ];
     for (const fallback of fallbacks) {
-      if (steps.length >= 3) break;
+      if (steps.length >= 4) break;
       const filters = {
         ...empty,
         [fallback.field]: fallback.values

@@ -110,7 +110,14 @@ describe("DeepSeek adaptive campaign behavior", () => {
           summary: "海外销售多方向",
           targetShortlist: 10,
           steps: [
-            step("seed_company", "公司种子", { companies: ["阿里云"] }),
+            {
+              type: "seed_company",
+              title: "公司种子",
+              objective: "验证公司",
+              rationale: "目标公司",
+              limit: 20,
+              companies: ["阿里云"],
+            },
             step("seed_company", "重复公司", { companies: ["阿里云"] }),
             step("manual", "空方向", {}),
             step("manual", "另一空方向", {}),
@@ -123,7 +130,15 @@ describe("DeepSeek adaptive campaign behavior", () => {
     pack.roles.adjacent = ["大客户经理"];
     pack.industries.target = ["SaaS"];
     const result = await provider.generateGuluCampaign(pack);
-    expect(result.data.steps.length).toBeGreaterThanOrEqual(3);
+    expect(result.data.steps.length).toBeGreaterThanOrEqual(4);
+    expect(result.data.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          title: "公司种子",
+          filters: expect.objectContaining({ companies: ["阿里云"] }),
+        }),
+      ]),
+    );
     expect(
       result.data.steps.every((item) =>
         Object.values(item.filters).some((values) => values.length),

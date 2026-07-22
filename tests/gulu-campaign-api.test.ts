@@ -22,6 +22,6 @@ describe('adaptive campaign API',()=>{
     generated.data.targetShortlist=6;expect((await request(`/api/jobs/job-1/gulu-campaigns/${generated.data.id}`,{method:'PUT',body:JSON.stringify(generated.data)})).status).toBe(200);
     const confirmed=await request(`/api/jobs/job-1/gulu-campaigns/${generated.data.id}/confirm`,{method:'PUT',body:JSON.stringify(generated.data)});expect(confirmed.status).toBe(200);expect(confirmed.data.status).toBe('confirmed');
     const task=await request('/api/jobs/job-1/runs/gulu',{method:'POST',body:JSON.stringify({campaignId:generated.data.id,fresh:true})});expect(task.status).toBe(201);expect(task.data).toMatchObject({campaignId:generated.data.id,phase:'preflight',currentStepId:confirmed.data.steps[0].id});
-    const strategy=await request(`/api/runs/${task.data.id}/strategy`);expect(strategy.status).toBe(200);expect(strategy.data).toMatchObject({campaign:{id:generated.data.id},task:{id:task.data.id}});expect(strategy.data.steps).toHaveLength(3);
+    const strategy=await request(`/api/runs/${task.data.id}/strategy`);expect(strategy.status).toBe(200);expect(strategy.data).toMatchObject({campaign:{id:generated.data.id},task:{id:task.data.id}});expect(strategy.data.steps).toHaveLength(confirmed.data.steps.length);
   });
 });
