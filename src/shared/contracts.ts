@@ -34,7 +34,7 @@ export const CandidateSchema = z.object({
   id: z.string(), jobId: z.string(), dedupeKey: z.string(), name: z.string(),
   guluId: z.string().optional(), detailUrl: z.string().optional(),
   currentCompany: z.string(), currentRole: z.string(), experiences: z.array(ExperienceSchema),
-  sourceRound: z.enum(['company', 'role']).default('role'),
+  sourceRound: z.enum(['company', 'role','campaign']).default('campaign'),
 });
 
 export type Candidate = z.infer<typeof CandidateSchema>;
@@ -57,6 +57,7 @@ export const GuluFiltersSchema = z.object({
   industries: z.array(z.string()).default([]),
   functions: z.array(z.string()).default([]),
 });
+export type GuluFilters=z.infer<typeof GuluFiltersSchema>;
 
 export const GuluSearchRoundSchema = z.object({
   kind: z.enum(['company', 'role']),
@@ -79,6 +80,37 @@ export const GuluSearchPlanSchema = z.object({
 });
 export type GuluSearchPlan = z.infer<typeof GuluSearchPlanSchema>;
 
+export const GuluSearchStepTypeSchema=z.enum(['seed_company','role_cluster','market_cluster','company_expansion','manual','legacy']);
+export const GuluSearchSourceSchema=z.object({
+  kind:z.enum(['approved_rule','peer_note','deepseek','candidate_company','manual']),
+  field:z.enum(['keywords','companies','roles','cities','industries','functions']),
+  value:z.string().trim().min(1),reason:z.string().trim().min(1).max(500),
+});
+export const GuluSearchStepSchema=z.object({
+  id:z.string().min(1),order:z.number().int().min(0).max(7),type:GuluSearchStepTypeSchema,
+  title:z.string().trim().min(1).max(120),objective:z.string().trim().min(1).max(500),rationale:z.string().trim().min(1).max(1000),
+  expectedSignals:z.array(z.string().trim().min(1)).max(12).default([]),limit:z.number().int().min(5).max(40),enabled:z.boolean().default(true),
+  filters:GuluFiltersSchema,sources:z.array(GuluSearchSourceSchema).max(100).default([]),
+});
+export const GuluSearchCampaignSchema=z.object({
+  id:z.string().min(1),jobId:z.string().min(1),ruleVersion:z.number().int().positive(),version:z.number().int().positive().default(1),
+  status:z.enum(['draft','confirmed']).default('draft'),summary:z.string().trim().min(1).max(3000),sourceNotes:z.string().max(20_000).default(''),
+  targetShortlist:z.number().int().min(5).max(15).default(10),maxUniqueCandidates:z.number().int().min(20).max(150).default(150),maxSteps:z.number().int().min(1).max(8).default(8),
+  steps:z.array(GuluSearchStepSchema).min(1).max(8),confirmedAt:z.string().datetime().nullable().default(null),
+  createdAt:z.string().datetime().default(()=>new Date().toISOString()),updatedAt:z.string().datetime().default(()=>new Date().toISOString()),
+});
+export type GuluSearchCampaign=z.infer<typeof GuluSearchCampaignSchema>;
+export type GuluSearchStep=z.infer<typeof GuluSearchStepSchema>;
+
+export const GuluStepProgressSchema=z.object({
+  stepId:z.string().min(1),status:z.enum(['pending','preflighting','calibrating','running','empty','completed','skipped','failed']).default('pending'),
+  page:z.number().int().positive().default(1),candidateCursor:z.number().int().nonnegative().default(0),readCount:z.number().int().nonnegative().default(0),
+  uniqueCount:z.number().int().nonnegative().default(0),duplicateRate:z.number().min(0).max(1).default(0),highFitCount:z.number().int().nonnegative().default(0),lastError:z.string().nullable().default(null),
+});
+export type GuluStepProgress=z.infer<typeof GuluStepProgressSchema>;
+export const GuluSearchFitSchema=z.object({score:z.number().int().min(0).max(100),evidence:z.array(z.string().min(1)).min(1).max(4),gaps:z.array(z.string().min(1)).max(6).default([]),model:z.string().min(1),inputTokens:z.number().int().nonnegative(),outputTokens:z.number().int().nonnegative()});
+export type GuluSearchFit=z.infer<typeof GuluSearchFitSchema>;
+
 export const JobChangeNoteSchema = z.object({
   id:z.string().min(1), jobId:z.string().min(1), text:z.string().trim().min(1).max(20_000),
   createdAt:z.string(), appliedRuleVersion:z.number().int().positive().nullable().default(null),
@@ -93,8 +125,8 @@ export const GuluCandidateSnapshotSchema = z.object({
   company: z.string().default(''), role: z.string().default(''), city: z.string().default(''),
   industry: z.string().default(''), function: z.string().default(''), salary: z.string().default(''),
   experiences: z.array(GuluExperienceSchema).default([]), education: z.array(z.string()).default([]), tags: z.array(z.string()).default([]),
-  sourceRound: z.enum(['company', 'role']), page: z.number().int().positive(), capturedAt: z.string().datetime(),
-}).strict();
+  sourceRound: z.enum(['company', 'role','campaign']).optional(),sourceStepId:z.string().min(1).optional(), page: z.number().int().positive(), capturedAt: z.string().datetime(),
+}).strict().refine(value=>Boolean(value.sourceRound||value.sourceStepId),'candidate_source_required');
 export type GuluCandidateSnapshot = z.infer<typeof GuluCandidateSnapshotSchema>;
 
 export const GuluTaskStatusSchema = z.enum(['queued','running','paused','needs_attention','completed','stopped','failed']);
@@ -113,6 +145,9 @@ export const GuluConnectorTaskSchema = z.object({
   companyStatus: GuluRoundStatusSchema.default('pending'), roleStatus: GuluRoundStatusSchema.default('pending'),
   companyReadCount: z.number().int().nonnegative().default(0), roleReadCount: z.number().int().nonnegative().default(0),
   lastError: z.string().nullable().default(null),
+  campaignId:z.string().nullable().default(null),campaignVersion:z.number().int().positive().nullable().default(null),
+  phase:z.enum(['preflight','calibration','search','adapting','completed']).default('preflight'),currentStepIndex:z.number().int().nonnegative().default(0),currentStepId:z.string().nullable().default(null),
+  shortlistedCount:z.number().int().nonnegative().default(0),completionReason:z.string().nullable().default(null),stepProgress:z.array(GuluStepProgressSchema).default([]),
   createdAt: z.string().optional(), updatedAt: z.string().optional(),
 });
 export type GuluConnectorTask = z.infer<typeof GuluConnectorTaskSchema>;

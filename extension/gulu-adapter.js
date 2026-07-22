@@ -1,5 +1,5 @@
 export const SEMANTIC_OPERATIONS=Object.freeze(['inspectState','inspectListState','resetFilters','applyFilters','readList','openDetail','readDetail','nextPage']);
-const allowed=Object.freeze(['guluId','name','detailUrl','company','role','city','industry','function','salary','experiences','education','tags','sourceRound','page','capturedAt']);
+const allowed=Object.freeze(['guluId','name','detailUrl','company','role','city','industry','function','salary','experiences','education','tags','sourceRound','sourceStepId','page','capturedAt']);
 export function sanitizeSnapshot(input){const output={};for(const key of allowed)if(input[key]!==undefined)output[key]=input[key];output.experiences=Array.isArray(output.experiences)?output.experiences:[];output.education=Array.isArray(output.education)?output.education:[];output.tags=Array.isArray(output.tags)?output.tags:[];for(const key of ['company','role','city','industry','function','salary'])output[key]=String(output[key]??'').slice(0,500);return output;}
 const clean=(value)=>String(value??'').replace(/\s+/g,' ').trim();
 const hasExplicitEmpty=(doc)=>/\u6682\u65e0(?:\u6570\u636e|\u8bb0\u5f55)?|\u65e0\u6570\u636e|\u6ca1\u6709.*\u6570\u636e/.test(clean(doc.body?.innerText??doc.body?.textContent));

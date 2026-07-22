@@ -10,7 +10,7 @@ import { ScreeningEngine } from './services/screening.js';
 import { demoCompanyRound, demoRoleRound } from './demo/candidates.js';
 import { buildCsv, buildWorkbook, deleteJobData } from './services/exports.js';
 import { DeepSeekProvider } from './services/deepseek.js';
-import { sanitizeTextForCloud } from './services/redaction.js';
+import { sanitizeCandidate, sanitizeTextForCloud } from './services/redaction.js';
 import { GuluService } from './services/gulu.js';
 import { JobChangeService } from './services/job-changes.js';
 import { archiveJob, restoreJob } from './services/job-archive.js';
@@ -38,7 +38,7 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
   };
   app.disable('x-powered-by'); app.use(express.json({ limit: '2mb' }));
 
-  app.get('/api/health', (_req, res) => res.json({ ok: true, host: '127.0.0.1', mode: 'local-only', version: '1.2.0' }));
+  app.get('/api/health', (_req, res) => res.json({ ok: true, host: '127.0.0.1', mode: 'local-only', version: '1.3.0' }));
 
   app.post('/api/connectors/gulu/pairing', (_req,res,next) => { try { res.status(201).json(gulu.createPairing()); } catch(error){ next(error); } });
   app.get('/api/connectors/gulu/status', (_req,res) => res.json(gulu.getStatus()));
@@ -51,8 +51,9 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
   app.post('/api/connector/gulu/heartbeat',connectorAuth,(req,res)=>{gulu.heartbeat(String(req.body?.status??'online'),req.body?.error?String(req.body.error):null);res.json({ok:true});});
   app.get('/api/connector/gulu/tasks/next',connectorAuth,(_req,res)=>{
     const row=db.prepare("SELECT id,job_id FROM gulu_tasks WHERE status IN ('queued','running') ORDER BY created_at LIMIT 1").get() as {id:string;job_id:string}|undefined;
-    if (!row) return res.json({task:null}); const task=gulu.getTask(row.id); const plan=gulu.getTaskPlan(row.id); res.json({task,plan,pacingMs:{min:800,max:1500}});
+    if (!row) return res.json({task:null}); const task=gulu.getTask(row.id);if(task.campaignId){const strategy=gulu.getTaskStrategy(row.id);return res.json({...strategy,step:gulu.getCurrentCampaignStep(row.id),pacingMs:{min:800,max:1500}})}const plan=gulu.getTaskPlan(row.id); res.json({task,plan,pacingMs:{min:800,max:1500}});
   });
+  app.post('/api/connector/gulu/tasks/:taskId/candidates/check',connectorAuth,(req,res,next)=>{try{const ids=Array.isArray(req.body?.guluIds)?req.body.guluIds.map(String):[];res.json({unseen:gulu.filterUnseen(String(req.params.taskId),ids)})}catch(error){next(error)}});
   app.post('/api/connector/gulu/tasks/:taskId/events',connectorAuth,async(req,res,next)=>{try{
     const type=String(req.body?.type??''); const eventId=String(req.body?.eventId??''); if(!eventId) return res.status(400).json({error:'event_id_required'});
     const taskId=String(req.params.taskId);
@@ -61,13 +62,23 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
       const requestKey=`${taskId}:${eventId}`;const existing=candidateRequests.get(requestKey);if(existing)return res.json(await existing);
       const processing=(async()=>{const recorded=gulu.recordCandidate(taskId,eventId,req.body.snapshot);
         const task=gulu.getTask(taskId);const snapshot=req.body.snapshot;
-        const candidate={id:`${task.jobId}:gulu:${snapshot.guluId}`,jobId:task.jobId,dedupeKey:String(snapshot.guluId||snapshot.detailUrl),name:String(snapshot.name),guluId:String(snapshot.guluId),detailUrl:String(snapshot.detailUrl),currentCompany:String(snapshot.company??''),currentRole:String(snapshot.role??''),experiences:(snapshot.experiences??[]).map((item:Record<string,unknown>)=>({company:String(item.company??''),role:String(item.role??''),period:String(item.period??''),summary:String(item.summary??'')})),sourceRound:snapshot.sourceRound};
+        const candidate={id:`${task.jobId}:gulu:${snapshot.guluId}`,jobId:task.jobId,dedupeKey:String(snapshot.guluId||snapshot.detailUrl),name:String(snapshot.name),guluId:String(snapshot.guluId),detailUrl:String(snapshot.detailUrl),currentCompany:String(snapshot.company??''),currentRole:String(snapshot.role??''),experiences:(snapshot.experiences??[]).map((item:Record<string,unknown>)=>({company:String(item.company??''),role:String(item.role??''),period:String(item.period??''),summary:String(item.summary??'')})),sourceRound:snapshot.sourceRound??'campaign'};
         const controller=new AbortController();taskControllers.set(taskId,controller);
-        try{const assessed=await engine.assessCandidate(task.jobId,task.ruleVersion,candidate,controller.signal);const latest=gulu.getTask(taskId);if(!['queued','running'].includes(latest.status))throw new Error('task_not_running');gulu.linkCandidate(taskId,assessed.candidateId);return assessed.created?gulu.recordAnalysis(taskId,assessed.decision.inputTokens,assessed.decision.outputTokens):recorded;}finally{if(taskControllers.get(taskId)===controller)taskControllers.delete(taskId);}
+        try{const assessed=await engine.assessCandidate(task.jobId,task.ruleVersion,candidate,controller.signal);const latest=gulu.getTask(taskId);if(!['queued','running'].includes(latest.status))throw new Error('task_not_running');gulu.linkCandidate(taskId,assessed.candidateId);if(latest.campaignId){let fit;try{fit=await deepSeek.scoreSearchFit(getCurrentVersion(db,task.jobId)!,sanitizeCandidate(candidate),controller.signal)}catch{fit={score:0,evidence:['搜索匹配度暂时不可用'],gaps:['等待DeepSeek恢复'],model:'fallback',inputTokens:0,outputTokens:0}}gulu.recordSearchFit(taskId,assessed.candidateId,String(snapshot.sourceStepId??latest.currentStepId),fit)}return assessed.created?gulu.recordAnalysis(taskId,assessed.decision.inputTokens,assessed.decision.outputTokens):recorded;}finally{if(taskControllers.get(taskId)===controller)taskControllers.delete(taskId);}
       })();candidateRequests.set(requestKey,processing);
       try{return res.json(await processing);}finally{if(candidateRequests.get(requestKey)===processing)candidateRequests.delete(requestKey);}
     }
     if(type==='failure') return res.json(gulu.recordFailure(taskId,String(req.body?.error??'connector_failure')));
+    if(type==='preflight_completed')return res.json(gulu.completePreflight(taskId));
+    if(type==='step_started'){const stepId=String(req.body?.stepId??'');if(!stepId||stepId!==gulu.getTask(taskId).currentStepId)return res.status(400).json({error:'invalid_step'});return res.json(gulu.startStep(taskId,stepId));}
+    if(type==='step_calibrated'){
+      const stepId=String(req.body?.stepId??'');const task=gulu.getTask(taskId);const progress=task.stepProgress.find(item=>item.stepId===stepId);if(!progress)return res.status(400).json({error:'invalid_step'});
+      const metrics={read:progress.readCount,unique:progress.uniqueCount,highFit:progress.highFitCount,duplicateRate:progress.duplicateRate};
+      if(progress.uniqueCount<3){gulu.recordStrategyDecision(taskId,stepId,'next_step',metrics,'首批新增候选不足3人');return res.json(gulu.completeStep(taskId,stepId,progress.uniqueCount===0))}
+      let decision;try{const companies=(db.prepare(`SELECT DISTINCT c.current_company company FROM gulu_search_fits f JOIN candidates c ON c.id=f.candidate_id WHERE f.task_id=? AND f.step_id=? AND f.score>=70 AND c.current_company<>'' LIMIT 10`).all(taskId,stepId) as Array<{company:string}>).map(row=>row.company);decision=(await deepSeek.decideGuluStrategy({campaignSummary:gulu.getTaskStrategy(taskId).campaign.summary,stepTitle:gulu.getCurrentCampaignStep(taskId)?.title??stepId,metrics,candidateCompanies:companies})).data}catch{decision={action:'continue' as const,rationale:'DeepSeek调优暂时不可用，继续执行已确认步骤',companies:[]}}
+      gulu.recordStrategyDecision(taskId,stepId,decision.action,metrics,decision.rationale,{companies:decision.companies});if(decision.action==='append_company_step')for(const company of decision.companies)try{gulu.appendCompanyStep(taskId,company)}catch{/* duplicate or budget exhausted */}if(decision.action==='next_step'||(Boolean(req.body?.exhausted)&&decision.action==='continue'))return res.json(gulu.completeStep(taskId,stepId,false));if(decision.action==='stop')return res.json(gulu.stopCampaign(taskId,decision.completionReason??'strategy_stop'));return res.json(gulu.finishCalibration(taskId,stepId));
+    }
+    if(type==='step_completed'){const stepId=String(req.body?.stepId??'');if(!stepId)return res.status(400).json({error:'invalid_step'});return res.json(gulu.completeStep(taskId,stepId,Boolean(req.body?.empty)))}
     if(type==='round_started'||type==='round_completed'){
       const round=String(req.body?.round??'');if(round!=='company'&&round!=='role')return res.status(400).json({error:'invalid_round'});
       return res.json(type==='round_started'?gulu.startRound(taskId,round):gulu.completeRound(taskId,round,Boolean(req.body?.empty)));
@@ -158,13 +169,23 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
   app.put('/api/jobs/:jobId/gulu-plan',(req,res,next)=>{try{res.json(gulu.saveDraft({...req.body,jobId:req.params.jobId}))}catch(error){next(error)}});
   app.put('/api/jobs/:jobId/gulu-plan/confirm',(req,res,next)=>{try{res.json(gulu.confirmPlan(req.params.jobId,req.body))}catch(error){next(error)}});
   app.get('/api/jobs/:jobId/gulu-plan',(req,res)=>{const plan=gulu.getPlan(req.params.jobId);if(!plan)return res.status(404).json({error:'gulu_plan_not_found'});res.json(plan)});
+  app.post('/api/jobs/:jobId/gulu-campaigns/generate',async(req,res,next)=>{try{
+    const jobId=req.params.jobId;const pack=getCurrentVersion(db,jobId);if(!pack)return res.status(404).json({error:'job_not_found'});if(pack.approval.status!=='approved')return res.status(409).json({error:'rules_not_approved'});
+    const sourceNotes=sanitizeTextForCloud(String(req.body?.sourceNotes??'').trim());const history=db.prepare(`SELECT read_count uniqueCount,shortlisted_count highFit,completion_reason completionReason FROM gulu_tasks WHERE job_id=? AND campaign_id IS NOT NULL ORDER BY created_at DESC LIMIT 5`).all(jobId) as Array<Record<string,unknown>>;
+    const generated=await deepSeek.generateGuluCampaign(pack,sourceNotes,history);const versionRow=db.prepare('SELECT COALESCE(MAX(version),0)+1 version FROM gulu_search_campaigns WHERE job_id=?').get(jobId) as {version:number};res.json(gulu.saveCampaign({...generated.data,version:versionRow.version}));
+  }catch(error){next(error)}});
+  app.put('/api/jobs/:jobId/gulu-campaigns/:campaignId',(req,res,next)=>{try{res.json(gulu.saveCampaign({...req.body,id:req.params.campaignId,jobId:req.params.jobId}))}catch(error){next(error)}});
+  app.put('/api/jobs/:jobId/gulu-campaigns/:campaignId/confirm',(req,res,next)=>{try{res.json(gulu.confirmCampaign(req.params.jobId,req.params.campaignId,req.body))}catch(error){next(error)}});
+  app.get('/api/jobs/:jobId/gulu-campaigns/:campaignId',(req,res,next)=>{try{res.json(gulu.getCampaign(req.params.jobId,req.params.campaignId))}catch(error){if(error instanceof Error&&error.message==='campaign_not_found')return res.status(404).json({error:error.message});next(error)}});
   app.get('/api/jobs/:jobId/runs/gulu',(req,res)=>res.json({items:gulu.listTasks(String(req.params.jobId))}));
   app.post('/api/jobs/:jobId/runs/gulu',(req,res,next)=>{try{
     if(req.body?.fresh!==undefined&&typeof req.body.fresh!=='boolean')return res.status(400).json({error:'fresh_must_be_boolean'});
+    const campaignId=String(req.body?.campaignId??'').trim();if(campaignId)return res.status(201).json(gulu.startCampaignTask(String(req.params.jobId),campaignId));
     const requested=String(req.body?.mode??'dry-run');const mode=requested==='pilot'||requested==='formal'?requested:'dry-run';
     if(req.body?.fresh===true&&mode!=='formal')return res.status(400).json({error:'fresh_requires_formal'});
     res.status(201).json(gulu.startTask(String(req.params.jobId),mode));
-  }catch(error){if(error instanceof Error&&['gulu_plan_not_confirmed','rules_not_approved','gulu_plan_outdated','gulu_dry_run_required','gulu_pilot_required','gulu_task_already_active'].includes(error.message))return res.status(409).json({error:error.message});next(error)}});
+  }catch(error){if(error instanceof Error&&['gulu_plan_not_confirmed','rules_not_approved','gulu_plan_outdated','gulu_dry_run_required','gulu_pilot_required','gulu_task_already_active','campaign_not_confirmed','campaign_outdated'].includes(error.message))return res.status(409).json({error:error.message});next(error)}});
+  app.get('/api/runs/:runId/strategy',(req,res,next)=>{try{res.json(gulu.getTaskStrategy(req.params.runId))}catch(error){if(error instanceof Error&&['run_not_found','campaign_not_found'].includes(error.message))return res.status(404).json({error:error.message});next(error)}});
 
   app.get('/api/jobs/:jobId/job-pack.json', (req, res) => {
     const pack = getCurrentVersion(db, req.params.jobId); if (!pack) return res.status(404).end();

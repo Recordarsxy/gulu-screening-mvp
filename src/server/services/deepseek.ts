@@ -1,8 +1,10 @@
 import { assertNoSensitiveText } from './redaction.js';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { GuluSearchPlanSchema, JobPackSchema, type GuluSearchPlan, type JobPack } from '../../shared/contracts.js';
+import { GuluSearchFitSchema, GuluSearchPlanSchema, GuluSearchStepSchema, JobPackSchema, type GuluSearchCampaign, type GuluSearchFit, type GuluSearchPlan, type JobPack } from '../../shared/contracts.js';
 import { normalizeAiDraftRules } from './job-pack.js';
 import type { SafeCandidate } from './redaction.js';
+import {lintCampaign} from './gulu-campaign.js';
 
 export type DeepSeekUsage = { inputTokens: number; outputTokens: number };
 export type DeepSeekResult<T> = { data: T; usage: DeepSeekUsage; model: string };
@@ -36,6 +38,12 @@ const AiDecisionSchema = z.object({
   evidence: z.array(z.string().min(1)).min(1).max(4),
 });
 export type AiDecision = z.infer<typeof AiDecisionSchema> & { model:string;inputTokens:number;outputTokens:number };
+const StrategyDecisionSchema=z.object({
+  action:z.enum(['continue','next_step','append_company_step','stop']),rationale:z.string().trim().min(1).max(1000),
+  companies:z.array(z.object({name:z.string().trim().min(1),source:z.enum(['deepseek','candidate_company']),reason:z.string().trim().min(1).max(500)})).max(10).default([]),
+  completionReason:z.string().trim().max(500).optional(),
+});
+export type GuluStrategyDecision=z.infer<typeof StrategyDecisionSchema>;
 
 export class DeepSeekProvider {
   private readonly apiKey: string;
@@ -155,6 +163,27 @@ export class DeepSeekProvider {
     }));
     const data=GuluSearchPlanSchema.parse({jobId:pack.job_id,ruleVersion:pack.rule_version,sourceNotes,status:'draft',confirmedAt:null,rounds});
     return {data,usage:result.usage,model:result.model};
+  }
+
+  async generateGuluCampaign(pack:JobPack,sourceNotes='',history:Array<Record<string,unknown>>=[]):Promise<DeepSeekResult<GuluSearchCampaign>>{
+    const result=await this.generateJson<Record<string,unknown>>('你是资深招聘寻访策略师。基于已批准岗位规则，为谷露生成3至8个逐步放宽且互不重复的搜索步骤。不得只生成固定公司轮和岗位轮。字段仅限keywords、companies、roles、cities、industries、functions；每步5至40人，总计不超过150人。职位和行业只能使用规则或用户输入，公司可以推导相邻人才公司。只输出summary、targetShortlist、steps JSON。',{rules:{constraints:pack.constraints,industries:pack.industries,companies:pack.companies,roles:pack.roles,evidence:pack.evidence},source_notes:sourceNotes,history},undefined,4000);
+    const rawSteps=Array.isArray(result.data.steps)?result.data.steps:[];
+    if(rawSteps.length<3||rawSteps.length>8)throw new DeepSeekError('invalid_campaign');
+    const empty={keywords:[],companies:[],roles:[],cities:[],industries:[],functions:[]};
+    const steps=rawSteps.map((raw,index)=>{const item=(raw&&typeof raw==='object'?raw:{}) as Record<string,unknown>;const rawFilters=(item.filters&&typeof item.filters==='object'?item.filters:{}) as Record<string,unknown>;const filters=Object.fromEntries(Object.entries(empty).map(([key])=>[key,Array.isArray(rawFilters[key])?rawFilters[key].map(String).map(value=>value.trim()).filter(Boolean):[]]));const sources=Object.entries(filters).flatMap(([field,values])=>(values as string[]).map(value=>({kind:field==='companies'?'deepseek':'approved_rule',field,value,reason:field==='companies'?'DeepSeek根据岗位画像推导':'来自已批准岗位搜索词'})));return GuluSearchStepSchema.parse({...item,id:String(item.id??randomUUID()),order:index,type:item.type??'manual',title:item.title??`搜索步骤 ${index+1}`,objective:item.objective??String(item.title??'验证人才方向'),rationale:item.rationale??'基于批准岗位规则生成',expectedSignals:Array.isArray(item.expectedSignals)?item.expectedSignals:[],limit:Math.min(40,Math.max(5,Number(item.limit)||20)),enabled:item.enabled!==false,filters,sources:item.sources??sources})});
+    const now=new Date().toISOString();const data=lintCampaign({id:randomUUID(),jobId:pack.job_id,ruleVersion:pack.rule_version,version:1,status:'draft',summary:String(result.data.summary??'岗位专属自适应搜索策略'),sourceNotes,targetShortlist:Math.min(15,Math.max(5,Number(result.data.targetShortlist)||10)),maxUniqueCandidates:150,maxSteps:8,steps,confirmedAt:null,createdAt:now,updatedAt:now});
+    return{data,usage:result.usage,model:result.model};
+  }
+
+  async scoreSearchFit(pack:JobPack,candidate:SafeCandidate,signal?:AbortSignal):Promise<GuluSearchFit>{
+    const result=await this.generateJson('你是招聘检索质量评估助手。评估候选经历与岗位搜索目标的接近程度，输出0到100分search fit、1到4条已命中证据和信息缺口。该分数只优化搜索，不代表录用或淘汰。',{rules:{constraints:pack.constraints,industries:pack.industries,roles:pack.roles,evidence:pack.evidence},candidate},signal);
+    const parsed=GuluSearchFitSchema.omit({model:true,inputTokens:true,outputTokens:true}).parse(result.data);
+    return{...parsed,model:result.model,inputTokens:result.usage.inputTokens,outputTokens:result.usage.outputTokens};
+  }
+
+  async decideGuluStrategy(input:{campaignSummary:string;stepTitle:string;metrics:{read:number;unique:number;highFit:number;duplicateRate:number};candidateCompanies:string[]}):Promise<DeepSeekResult<GuluStrategyDecision>>{
+    const result=await this.generateJson('你是招聘搜索战役调优助手。只能选择continue、next_step、append_company_step或stop。运行中只能新增公司，不得新增职位、行业、城市、职能或关键词。相同方向不得重复。',{...input,allowed_runtime_change:'companies_only'});
+    const data=StrategyDecisionSchema.parse(result.data);return{data,usage:result.usage,model:result.model};
   }
 
   async testConnection(): Promise<ConnectionResult> {

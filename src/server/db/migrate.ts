@@ -174,4 +174,45 @@ export function migrate(db: DatabaseSync): void {
       db.prepare('INSERT INTO schema_migrations(version) VALUES (6)').run();db.exec('COMMIT');
     } catch(error){db.exec('ROLLBACK');throw error;}
   }
+  const version7=db.prepare('SELECT 1 ok FROM schema_migrations WHERE version=7').get();
+  if(!version7){
+    db.exec('BEGIN');
+    try{
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS gulu_search_campaigns (
+          id TEXT PRIMARY KEY,job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,version INTEGER NOT NULL,
+          rule_version INTEGER NOT NULL,status TEXT NOT NULL,campaign_json TEXT NOT NULL,confirmed_at TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(job_id,version)
+        );
+        CREATE TABLE IF NOT EXISTS gulu_task_steps (
+          task_id TEXT NOT NULL REFERENCES gulu_tasks(id) ON DELETE CASCADE,step_id TEXT NOT NULL,position INTEGER NOT NULL,
+          step_json TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',page INTEGER NOT NULL DEFAULT 1,candidate_cursor INTEGER NOT NULL DEFAULT 0,
+          read_count INTEGER NOT NULL DEFAULT 0,unique_count INTEGER NOT NULL DEFAULT 0,high_fit_count INTEGER NOT NULL DEFAULT 0,last_error TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY(task_id,step_id),UNIQUE(task_id,position)
+        );
+        CREATE TABLE IF NOT EXISTS gulu_search_fits (
+          task_id TEXT NOT NULL REFERENCES gulu_tasks(id) ON DELETE CASCADE,candidate_id TEXT NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+          step_id TEXT NOT NULL,score INTEGER NOT NULL,evidence_json TEXT NOT NULL,gaps_json TEXT NOT NULL,model TEXT NOT NULL,
+          input_tokens INTEGER NOT NULL DEFAULT 0,output_tokens INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY(task_id,candidate_id)
+        );
+        CREATE TABLE IF NOT EXISTS gulu_strategy_decisions (
+          id TEXT PRIMARY KEY,task_id TEXT NOT NULL REFERENCES gulu_tasks(id) ON DELETE CASCADE,step_id TEXT,
+          action TEXT NOT NULL,metrics_json TEXT NOT NULL,rationale TEXT NOT NULL,patch_json TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+      const columns=db.prepare('PRAGMA table_info(gulu_tasks)').all() as Array<{name:string}>;
+      const add=(name:string,sql:string)=>{if(!columns.some(column=>column.name===name))db.exec(sql)};
+      add('campaign_id','ALTER TABLE gulu_tasks ADD COLUMN campaign_id TEXT');
+      add('campaign_version','ALTER TABLE gulu_tasks ADD COLUMN campaign_version INTEGER');
+      add('phase',"ALTER TABLE gulu_tasks ADD COLUMN phase TEXT NOT NULL DEFAULT 'preflight'");
+      add('current_step_index','ALTER TABLE gulu_tasks ADD COLUMN current_step_index INTEGER NOT NULL DEFAULT 0');
+      add('shortlisted_count','ALTER TABLE gulu_tasks ADD COLUMN shortlisted_count INTEGER NOT NULL DEFAULT 0');
+      add('completion_reason','ALTER TABLE gulu_tasks ADD COLUMN completion_reason TEXT');
+      db.prepare('INSERT INTO schema_migrations(version) VALUES (7)').run();db.exec('COMMIT');
+    }catch(error){db.exec('ROLLBACK');throw error;}
+  }
 }

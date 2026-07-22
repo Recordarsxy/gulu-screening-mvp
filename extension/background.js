@@ -70,6 +70,10 @@ function candidateEventId(task, seed) {
   return `candidate:${task.id}:${task.currentRound}:${seed.guluId}`;
 }
 
+function campaignCandidateEventId(task, step, seed) {
+  return `candidate:${task.id}:${step.id}:${seed.guluId}`;
+}
+
 function resumeSoon() {
   chrome.alarms.create('gulu-resume', { when: Date.now() + 1000 });
 }
@@ -120,6 +124,76 @@ async function restoreList(tabId, round, page, submit) {
   return state;
 }
 
+async function runCampaignTask({ task, campaign, steps, step }) {
+  const tab = await ensureTab();
+  if (task.phase === 'preflight') {
+    for (const item of steps) {
+      const state = await restoreList(tab.id, item, 1, false);
+      if (state.state === 'login_required' || state.state === 'captcha') {
+        await event(task.id, 'needs_attention', { error: state.state }, `attention:${task.id}:${state.state}`);
+        return;
+      }
+    }
+    await event(task.id, 'preflight_completed', {}, `preflight:${task.id}`);
+    resumeSoon();
+    return;
+  }
+  if (!step) throw new Error('search_step_missing');
+  const progress = task.stepProgress.find((item) => item.stepId === step.id);
+  if (!progress) throw new Error('search_step_progress_missing');
+  const state = await restoreList(tab.id, step, progress.page, true);
+  if (state.state === 'login_required' || state.state === 'captcha') {
+    await event(task.id, 'needs_attention', { error: state.state }, `attention:${task.id}:${state.state}`);
+    return;
+  }
+  if (progress.status === 'pending') await event(task.id, 'step_started', { stepId: step.id }, `step-start:${task.id}:${step.id}`);
+  const list = await send(tab.id, 'readList', { page: progress.page });
+  if (list.length === 0) {
+    await event(task.id, 'step_completed', { stepId: step.id, empty: true }, `step-complete:${task.id}:${step.id}`);
+    resumeSoon();return;
+  }
+  const checked = await api(`/api/connector/gulu/tasks/${task.id}/candidates/check`, { method: 'POST', body: JSON.stringify({ guluIds: list.map((seed) => seed.guluId) }) });
+  const unseen = new Set(checked.unseen);
+  let cursor = progress.candidateCursor;
+  let added = 0;
+  const target = task.phase === 'calibration' ? Math.min(5, step.limit) : step.limit;
+  while (cursor < list.length && progress.readCount + added < target) {
+    const seed = list[cursor];
+    if (unseen.has(seed.guluId)) {
+      let lastError = null;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const detail = await chrome.tabs.create({ url: seed.detailUrl, active: false });
+        try {
+          const detailState = await waitReady(detail.id);if (detailState.state !== 'detail') throw new Error(detailState.state);
+          const snapshot = await send(detail.id, 'readDetail', { seed, sourceRound: 'campaign', sourceStepId: step.id, page: progress.page });
+          await event(task.id, 'candidate', { snapshot: { ...snapshot, sourceRound: 'campaign', sourceStepId: step.id } }, campaignCandidateEventId(task, step, seed));
+          lastError = null;added += 1;break;
+        } catch (error) { lastError = error;if (attempt === 0) await pace(); }
+        finally { await chrome.tabs.remove(detail.id).catch(() => {}); }
+      }
+      if (lastError) {
+        const failure = await event(task.id, 'failure', { error: String(lastError?.message ?? lastError) }, `candidate-failure:${task.id}:${step.id}:${seed.guluId}`);
+        if (failure.status === 'needs_attention') return;
+      }
+    }
+    cursor += 1;
+    await event(task.id, 'checkpoint', { checkpoint: { candidateCursor: cursor } }, `cursor:${task.id}:${step.id}:${progress.page}:${cursor}`);
+    await pace();
+  }
+  const read = progress.readCount + added;
+  if (task.phase === 'calibration' && read >= 5) {
+    await event(task.id, 'step_calibrated', { stepId: step.id, exhausted: false }, `step-calibrated:${task.id}:${step.id}`);resumeSoon();return;
+  }
+  if (read >= step.limit || task.readCount + added >= campaign.maxUniqueCandidates) {
+    await event(task.id, 'step_completed', { stepId: step.id, empty: false }, `step-complete:${task.id}:${step.id}`);resumeSoon();return;
+  }
+  const hasNext = await send(tab.id, 'nextPage');
+  if (hasNext) await event(task.id, 'checkpoint', { checkpoint: { page: progress.page + 1, candidateCursor: 0 } }, `page:${task.id}:${step.id}:${progress.page + 1}`);
+  else if (task.phase === 'calibration') await event(task.id, 'step_calibrated', { stepId: step.id, exhausted: true }, `step-calibrated:${task.id}:${step.id}`);
+  else await event(task.id, 'step_completed', { stepId: step.id, empty: false }, `step-complete:${task.id}:${step.id}`);
+  resumeSoon();
+}
+
 async function runOnce() {
   if (active) {
     await api('/api/connector/gulu/heartbeat', {
@@ -141,6 +215,11 @@ async function runOnce() {
     const isNewTask = saved.lastTaskId !== task.id;
     if (task.status === 'queued') {
       await event(task.id, 'checkpoint', { checkpoint: { status: 'running' } }, `start:${task.id}`);
+    }
+    if (task.campaignId) {
+      await runCampaignTask(next);
+      if (isNewTask) await chrome.storage.local.set({ lastTaskId: task.id });
+      return;
     }
 
     const round = plan.rounds.find((item) => item.kind === task.currentRound);
