@@ -27,4 +27,20 @@ describe('adaptive campaign API',()=>{
     const auth={authorization:`Bearer ${redeemed.data.token}`};const probed=await request(`/api/connector/gulu/tasks/${task.data.id}/events`,{method:'POST',headers:auth,body:JSON.stringify({eventId:'probe-1',type:'step_probed',stepId:task.data.currentStepId,resultCount:374,filters:confirmed.data.steps[0].filters})});expect(probed.status).toBe(200);expect(probed.data).toMatchObject({action:'refine',resultCount:374,step:{filters:{roles:expect.any(Array)}}});
     const bounded=await request(`/api/connector/gulu/tasks/${task.data.id}/events`,{method:'POST',headers:auth,body:JSON.stringify({eventId:'probe-2',type:'step_probed',stepId:task.data.currentStepId,resultCount:42,filters:probed.data.step.filters})});expect(bounded.data.action).toBe('read');await request(`/api/connector/gulu/tasks/${task.data.id}/events`,{method:'POST',headers:auth,body:JSON.stringify({eventId:'start-1',type:'step_started',stepId:task.data.currentStepId})});const calibrated=await request(`/api/connector/gulu/tasks/${task.data.id}/events`,{method:'POST',headers:auth,body:JSON.stringify({eventId:'calibrate-1',type:'step_calibrated',stepId:task.data.currentStepId,exhausted:false})});expect(calibrated.status).toBe(200);expect(calibrated.data).toMatchObject({currentStepId:task.data.currentStepId,phase:'search'});
   });
+  it('returns only candidates whose current-task search fit is at least 70',async()=>{
+    const root=await mkdtemp(join(tmpdir(),'gulu-high-fit-'));cleanups.push(()=>rm(root,{recursive:true,force:true}));const db=openDatabase(':memory:');cleanups.push(()=>db.close());migrate(db);
+    createDraft(db,{jobId:'job-fit',title:'Sales leader',sourceText:'JD'});approveVersion(db,'job-fit',1);
+    db.prepare("INSERT INTO gulu_search_campaigns(id,job_id,version,rule_version,status,campaign_json) VALUES (?,?,?,?,?,?)").run('campaign-fit','job-fit',1,1,'confirmed','{}');
+    db.prepare("INSERT INTO gulu_tasks(id,job_id,rule_version,status,mode,plan_json,campaign_id,campaign_version) VALUES (?,?,?,?,?,?,?,?)").run('task-fit','job-fit',1,'completed','formal','{}','campaign-fit',1);
+    for(const [id,name,score,label] of [['low','Low Fit',69,'review'],['high','High Fit',70,'review'],['excluded','Excluded High Fit',90,'exclude']] as const){
+      db.prepare("INSERT INTO candidates(id,job_id,dedupe_key,name,current_company,current_role,experiences_json) VALUES (?,?,?,?,?,?,?)").run(id,'job-fit',`dedupe-${id}`,name,'Company','Role','[]');
+      db.prepare("INSERT INTO assessments(id,job_id,candidate_id,rule_version,label,reason_code,evidence_json,model) VALUES (?,?,?,?,?,?,?,?)").run(`assessment-${id}`,'job-fit',id,1,label,'NEEDS_REVIEW','[]','deepseek-v4-flash');
+      db.prepare("INSERT INTO gulu_task_candidates(task_id,candidate_id) VALUES (?,?)").run('task-fit',id);
+      db.prepare("INSERT INTO gulu_search_fits(task_id,candidate_id,step_id,score,evidence_json,gaps_json,model) VALUES (?,?,?,?,?,?,?)").run('task-fit',id,'step-1',score,'[]','[]','deepseek-v4-flash');
+    }
+    const ai=new DeepSeekProvider({apiKey:'test'});const http=createApp({db,dataRoot:root,deepSeek:ai}).listen(0,'127.0.0.1');await new Promise<void>(resolve=>http.once('listening',resolve));cleanups.push(()=>{http.close()});const port=(http.address() as AddressInfo).port;
+    const response=await fetch(`http://127.0.0.1:${port}/api/jobs/job-fit/results?runId=task-fit`);const body=await response.json() as {items:Array<{name:string;searchFit:number}>};
+    expect(body.items).toEqual([expect.objectContaining({name:'High Fit',searchFit:70})]);
+    expect((db.prepare("SELECT COUNT(*) count FROM gulu_search_fits WHERE task_id='task-fit'").get() as {count:number}).count).toBe(3);
+  });
 });

@@ -238,16 +238,20 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
   app.get('/api/jobs/:jobId/results', (req, res) => {
     const runId=typeof req.query.runId==='string'?req.query.runId:'';
     if(runId){
-      if(!db.prepare('SELECT 1 ok FROM gulu_tasks WHERE id=? AND job_id=?').get(runId,req.params.jobId))return res.status(404).json({error:'run_not_found'});
+      const scopedTask=db.prepare('SELECT campaign_id campaignId FROM gulu_tasks WHERE id=? AND job_id=?').get(runId,req.params.jobId) as {campaignId:string|null}|undefined;
+      if(!scopedTask)return res.status(404).json({error:'run_not_found'});
       const items=db.prepare(`SELECT c.id candidateId,c.name,c.gulu_id guluId,c.detail_url detailUrl,c.current_company currentCompany,
         c.current_role currentRole,c.source_round sourceRound,a.label,a.reason_code reasonCode,a.evidence_json evidence,
-        a.rule_version ruleVersion,a.assessed_at assessedAt,COALESCE(h.status,'未复核') reviewStatus,COALESCE(h.note,'') note
+        a.rule_version ruleVersion,a.assessed_at assessedAt,COALESCE(h.status,'未复核') reviewStatus,COALESCE(h.note,'') note,
+        sf.score searchFit
         FROM candidates c JOIN gulu_task_candidates tc ON tc.candidate_id=c.id
         JOIN gulu_tasks t ON t.id=tc.task_id AND t.job_id=c.job_id
         JOIN assessments a ON a.candidate_id=c.id AND a.rule_version=t.rule_version
+        LEFT JOIN gulu_search_fits sf ON sf.task_id=t.id AND sf.candidate_id=c.id
         LEFT JOIN human_reviews h ON h.candidate_id=c.id AND h.rule_version=a.rule_version
-        WHERE c.job_id=? AND t.id=? ORDER BY CASE a.label WHEN 'recommend' THEN 1 WHEN 'review' THEN 2 ELSE 3 END,c.name`)
-        .all(req.params.jobId,runId).map((row:any)=>({...row,evidence:JSON.parse(row.evidence)}));
+        WHERE c.job_id=? AND t.id=? AND (?=0 OR (sf.score>=70 AND a.label<>'exclude'))
+        ORDER BY sf.score DESC,CASE a.label WHEN 'recommend' THEN 1 WHEN 'review' THEN 2 ELSE 3 END,c.name`)
+        .all(req.params.jobId,runId,scopedTask.campaignId?1:0).map((row:any)=>({...row,evidence:JSON.parse(row.evidence)}));
       return res.json({items});
     }
     const items = db.prepare(`SELECT c.id candidateId,c.name,c.gulu_id guluId,c.detail_url detailUrl,c.current_company currentCompany,
