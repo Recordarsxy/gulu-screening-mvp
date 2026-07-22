@@ -131,7 +131,7 @@ async function restoreList(tabId, round, page, submit) {
     const scopeState = await waitReady(tabId);
     if (scopeState.state !== 'list') throw new Error(scopeState.state);
   }
-  const scope = await send(tabId, 'inspectCandidateScope');
+  const scope = scopeChange.changed ? { scope: 'all_talent' } : await send(tabId, 'inspectCandidateScope');
   if (scope.scope !== 'all_talent') throw new Error('candidate_scope_not_all_talent');
 
   await send(tabId, 'resetFilters');

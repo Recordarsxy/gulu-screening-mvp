@@ -87,6 +87,7 @@ describe('Chrome extension safety boundary', () => {
     expect(background).toContain('saved.lastTaskId !== task.id');
     expect(background).toContain("chrome.storage.local.set({ lastTaskId: task.id })");
     expect(background.indexOf("await send(tabId, 'inspectCandidateScope')")).toBeLessThan(background.indexOf("await send(tabId, 'resetFilters')"));
+    expect(background).toContain("scopeChange.changed ? { scope: 'all_talent' }");
     expect(background).toContain("scope.scope !== 'all_talent'");
     expect(background.indexOf("await send(tabId, 'resetFilters')")).toBeLessThan(background.indexOf("await send(tabId, 'applyFilters'"));
     expect(content).toContain("message.operation === 'resetFilters'");
