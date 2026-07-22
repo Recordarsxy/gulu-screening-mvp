@@ -124,7 +124,7 @@ async function restoreList(tabId, round, page, submit) {
   await delay(500);
   chrome.tabs.reload(tabId).catch(() => {});
   await delay(500);
-  const state = await waitReady(tabId);
+  let state = await waitReady(tabId);
   if (state.state === 'login_required' || state.state === 'captcha') return state;
   if (state.state !== 'list') throw new Error('unsupported_page');
 
