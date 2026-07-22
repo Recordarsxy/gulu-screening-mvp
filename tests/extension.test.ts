@@ -13,10 +13,11 @@ describe('Chrome extension safety boundary', () => {
     expect(source).toContain("tab?.url?.startsWith('http://121.43.105.7/')");
   });
 
-  it('keeps a diagnostic listener available when the page adapter cannot load', async()=>{
+  it('loads the page adapter synchronously before the diagnostic listener', async()=>{
     const source=await readFile(new URL('../extension/content.js',import.meta.url),'utf8');
-    expect(source).toContain('adapter_import_failed:');
-    expect(source).toContain('adapterPromise');
+    expect(source).toContain('globalThis.__GULU_ADAPTER__');
+    expect(source).toContain('adapter_unavailable');
+    expect(source).not.toContain('import(');
   });
 
   it('times out content-script messages instead of hanging forever',async()=>{
@@ -85,6 +86,8 @@ describe('Chrome extension safety boundary', () => {
     expect(background).toContain("'lastTaskId'");
     expect(background).toContain('saved.lastTaskId !== task.id');
     expect(background).toContain("chrome.storage.local.set({ lastTaskId: task.id })");
+    expect(background.indexOf("await send(tabId, 'inspectCandidateScope')")).toBeLessThan(background.indexOf("await send(tabId, 'resetFilters')"));
+    expect(background).toContain("scope.scope !== 'all_talent'");
     expect(background.indexOf("await send(tabId, 'resetFilters')")).toBeLessThan(background.indexOf("await send(tabId, 'applyFilters'"));
     expect(content).toContain("message.operation === 'resetFilters'");
   });
@@ -96,11 +99,13 @@ describe('Chrome extension safety boundary', () => {
     expect(manifest.permissions).toEqual(expect.arrayContaining(['tabs','storage','alarms']));
     expect(manifest.host_permissions).toEqual(['http://121.43.105.7/*','http://127.0.0.1/*']);
     expect(manifest.content_scripts[0].matches).toEqual(['http://121.43.105.7/*']);
+    expect(manifest.content_scripts[0].js).toEqual(['gulu-adapter.js','content.js']);
+    expect(manifest.web_accessible_resources).toBeUndefined();
   });
 
   it('exposes only semantic read operations and strips forbidden fields', async () => {
-    const adapter = await import('../extension/gulu-adapter.js');
-    expect(adapter.SEMANTIC_OPERATIONS).toEqual(['inspectState','inspectListState','resetFilters','applyFilters','readList','openDetail','readDetail','nextPage']);
+    const adapter = await import('../extension/gulu-adapter-module.js');
+    expect(adapter.SEMANTIC_OPERATIONS).toEqual(['inspectState','inspectCandidateScope','ensureAllTalentScope','inspectListState','resetFilters','applyFilters','readList','openDetail','readDetail','nextPage']);
     const safe=adapter.sanitizeSnapshot({guluId:'1',name:'甲',detailUrl:'http://121.43.105.7/crm#candidate/detail?id=1',company:'示例',role:'经理',phone:'13800000000',email:'a@b.com',notes:'秘密',sourceRound:'role',page:1,capturedAt:new Date().toISOString()});
     expect(safe).not.toHaveProperty('phone');expect(safe).not.toHaveProperty('email');expect(safe).not.toHaveProperty('notes');
     expect(Object.keys(safe).sort()).toEqual(expect.arrayContaining(['guluId','name','detailUrl','company','role']));

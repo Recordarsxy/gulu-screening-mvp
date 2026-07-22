@@ -1,6 +1,8 @@
 export const SEMANTIC_OPERATIONS: readonly string[];
 export function sanitizeSnapshot(input: Record<string,unknown>): Record<string,unknown>;
 export function inspectState(doc?:Document,loc?:Location):{state:string};
+export function inspectCandidateScope(options?:{doc?:Document}):{scope:'all_talent'|'my_candidates'|'unknown';label:string};
+export function ensureAllTalentScope(options?:{doc?:Document}):{scope:'all_talent'|'switching';label:string;changed:boolean};
 export function inspectListState(options?:{doc?:Document;loc?:{href?:string}}):{loading:boolean;page:number;count:number;empty:boolean;resultReady:boolean;queryReady:boolean;signature:string};
 export function resetFilters(options?:{doc?:Document}):Promise<{cleared:string[]}>;
 export function applyFilters(filters:Record<string,string[]>,options?:{submit?:boolean;reset?:boolean;doc?:Document;loc?:{href?:string}}):Promise<unknown>;

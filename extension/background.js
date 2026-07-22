@@ -125,6 +125,15 @@ async function restoreList(tabId, round, page, submit) {
   if (state.state === 'login_required' || state.state === 'captcha') return state;
   if (state.state !== 'list') throw new Error('unsupported_page');
 
+  const scopeChange = await send(tabId, 'ensureAllTalentScope');
+  if (scopeChange.changed) {
+    await delay(1000);
+    const scopeState = await waitReady(tabId);
+    if (scopeState.state !== 'list') throw new Error(scopeState.state);
+  }
+  const scope = await send(tabId, 'inspectCandidateScope');
+  if (scope.scope !== 'all_talent') throw new Error('candidate_scope_not_all_talent');
+
   await send(tabId, 'resetFilters');
   const beforeQuery = await send(tabId, 'inspectListState');
   await send(tabId, 'applyFilters', { filters: round.filters, submit, reset: false });
@@ -362,6 +371,8 @@ async function runOnce() {
         'page_restore_failed',
         'list_not_settled',
         'permission_denied',
+        'candidate_scope_unavailable',
+        'candidate_scope_not_all_talent',
       ].includes(message);
       await event(
         currentTask.id,

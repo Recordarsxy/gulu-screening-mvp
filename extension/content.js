@@ -1,18 +1,15 @@
-let adapterError = null;
-const adapterPromise = import(chrome.runtime.getURL('gulu-adapter.js')).catch((error) => {
-  adapterError = String(error?.message ?? error).slice(0, 160);
-  return null;
-});
+const adapter = globalThis.__GULU_ADAPTER__;
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   (async () => {
-    const adapter = await adapterPromise;
-    if (!adapter) return { ok:false, error:`adapter_import_failed:${adapterError ?? 'unknown'}` };
+    if (!adapter) return { ok:false, error:'adapter_unavailable' };
     try {
       if (!adapter.SEMANTIC_OPERATIONS.includes(message?.operation)) return { ok:false, error:'unsupported_operation' };
       const args = message.args ?? {};
       let result;
       if (message.operation === 'inspectState') result = adapter.inspectState();
+      if (message.operation === 'inspectCandidateScope') result = adapter.inspectCandidateScope();
+      if (message.operation === 'ensureAllTalentScope') result = adapter.ensureAllTalentScope();
       if (message.operation === 'inspectListState') result = adapter.inspectListState();
       if (message.operation === 'resetFilters') result = await adapter.resetFilters();
       if (message.operation === 'applyFilters') result = await adapter.applyFilters(args.filters ?? {}, { submit:Boolean(args.submit), reset:args.reset !== false });
