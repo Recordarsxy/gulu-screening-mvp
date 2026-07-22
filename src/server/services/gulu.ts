@@ -210,8 +210,10 @@ export class GuluService {
     return Boolean(row.token_hash && constantEqual(row.token_hash,sha256(token)));
   }
 
-  heartbeat(status:string,error:null|string=null):void {
-    this.db.prepare('UPDATE gulu_connector SET last_seen_at=CURRENT_TIMESTAMP,gulu_status=?,last_error=? WHERE singleton=1').run(status.slice(0,40),error?.slice(0,300)??null);
+  heartbeat(status:string,error:null|string=null,extensionVersion=''):void {
+    this.db.prepare(`UPDATE gulu_connector SET last_seen_at=CURRENT_TIMESTAMP,gulu_status=?,last_error=?,
+      extension_version=CASE WHEN ?<>'' THEN ? ELSE extension_version END WHERE singleton=1`)
+      .run(status.slice(0,40),error?.slice(0,300)??null,extensionVersion,extensionVersion.slice(0,30));
   }
 
   getStatus() {

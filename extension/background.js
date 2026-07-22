@@ -198,7 +198,7 @@ async function runOnce() {
   if (active) {
     await api('/api/connector/gulu/heartbeat', {
       method: 'POST',
-      body: JSON.stringify({ status: 'online', busy: true }),
+      body: JSON.stringify({ status: 'online', busy: true, extensionVersion: chrome.runtime.getManifest().version }),
     }).catch(() => {});
     return;
   }
@@ -206,7 +206,7 @@ async function runOnce() {
   let currentTask = null;
   try {
     const next = await api('/api/connector/gulu/tasks/next');
-    await api('/api/connector/gulu/heartbeat', { method: 'POST', body: JSON.stringify({ status: 'online' }) });
+    await api('/api/connector/gulu/heartbeat', { method: 'POST', body: JSON.stringify({ status: 'online', extensionVersion: chrome.runtime.getManifest().version }) });
     if (!next.task) return;
 
     const { task, plan } = next;
@@ -353,7 +353,7 @@ async function runOnce() {
     }
     await api('/api/connector/gulu/heartbeat', {
       method: 'POST',
-      body: JSON.stringify({ status: 'error', error: message }),
+      body: JSON.stringify({ status: 'error', error: message, extensionVersion: chrome.runtime.getManifest().version }),
     }).catch(() => {});
   } finally {
     active = false;

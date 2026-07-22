@@ -48,7 +48,7 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
     const token=req.header('authorization')?.replace(/^Bearer\s+/i,'')??'';
     if (!gulu.authenticate(token)) return res.status(401).json({error:'connector_unauthorized'}); next();
   };
-  app.post('/api/connector/gulu/heartbeat',connectorAuth,(req,res)=>{gulu.heartbeat(String(req.body?.status??'online'),req.body?.error?String(req.body.error):null);res.json({ok:true});});
+  app.post('/api/connector/gulu/heartbeat',connectorAuth,(req,res)=>{gulu.heartbeat(String(req.body?.status??'online'),req.body?.error?String(req.body.error):null,String(req.body?.extensionVersion??''));res.json({ok:true});});
   app.get('/api/connector/gulu/tasks/next',connectorAuth,(_req,res)=>{
     const row=db.prepare("SELECT id,job_id FROM gulu_tasks WHERE status IN ('queued','running') ORDER BY created_at LIMIT 1").get() as {id:string;job_id:string}|undefined;
     if (!row) return res.json({task:null}); const task=gulu.getTask(row.id);if(task.campaignId){const strategy=gulu.getTaskStrategy(row.id);return res.json({...strategy,step:gulu.getCurrentCampaignStep(row.id),pacingMs:{min:800,max:1500}})}const plan=gulu.getTaskPlan(row.id); res.json({task,plan,pacingMs:{min:800,max:1500}});

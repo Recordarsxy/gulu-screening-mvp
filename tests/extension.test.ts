@@ -29,6 +29,7 @@ describe('Chrome extension safety boundary', () => {
     const source=await readFile(new URL('../extension/background.js',import.meta.url),'utf8');
     expect(source).toContain("if (active) {");
     expect(source).toContain("status: 'online', busy: true");
+    expect(source).toContain('extensionVersion: chrome.runtime.getManifest().version');
   });
 
   it('records round completion and resumes the role round immediately',async()=>{

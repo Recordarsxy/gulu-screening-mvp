@@ -34,6 +34,8 @@ describe('Gulu service', () => {
     const row=db.prepare('SELECT token_hash FROM gulu_connector').get() as {token_hash:string};
     expect(row.token_hash).not.toContain(redeemed.token);
     expect(service.authenticate(redeemed.token)).toBe(true);
+    service.heartbeat('online',null,'1.3.0');
+    expect(service.getStatus()).toMatchObject({extensionVersion:'1.3.0',guluStatus:'online'});
     service.createPairing();
     expect(service.authenticate(redeemed.token)).toBe(true);
   });
