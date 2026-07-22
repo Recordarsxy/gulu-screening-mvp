@@ -64,12 +64,12 @@ describe('Chrome extension safety boundary', () => {
     expect(source).not.toContain('|| expectedPage === 1');
   });
 
-  it('waits up to sixty seconds for candidates or an explicit empty state',async()=>{
+  it('waits up to sixty seconds for candidates or a verified zero total',async()=>{
     const source=await readFile(new URL('../extension/background.js',import.meta.url),'utf8');
     expect(source).toContain('attempt < 150');
     expect(source).toContain('state.resultReady');
-    expect(source).toContain('zeroCount >= 10');
-    expect(source).toContain('inferredEmpty: true');
+    expect(source).not.toContain('zeroCount >= 10');
+    expect(source).not.toContain('inferredEmpty: true');
     expect(source).toContain('list_not_settled:page=');
     expect(source).toContain('queryReady=${Boolean(lastState?.queryReady)}');
   });

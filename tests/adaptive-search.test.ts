@@ -5,7 +5,8 @@ import type {GuluFilters,GuluSearchCampaign} from '../src/shared/contracts.js';
 
 const filters=(overrides:Partial<GuluFilters>={}):GuluFilters=>({keywords:[],companies:[],roles:[],cities:[],industries:[],functions:[],...overrides});
 const step=(id:string,order:number,field:keyof GuluFilters,value:string)=>({id,order,type:'manual' as const,title:id,objective:id,rationale:id,expectedSignals:[],limit:15,enabled:true,filters:filters({[field]:[value]}),sources:[{kind:'manual' as const,field,value,reason:id}]});
-const campaign={id:'campaign-1',jobId:'job-1',ruleVersion:1,version:1,status:'confirmed' as const,summary:'adaptive',sourceNotes:'',targetShortlist:5,maxUniqueCandidates:120,maxSteps:8,confirmedAt:new Date().toISOString(),steps:[step('company',0,'companies','阿里云'),step('role-1',1,'roles','海外销售经理'),step('role-2',2,'roles','国际销售经理'),step('city',3,'cities','上海'),step('industry',4,'industries','SaaS')]} satisfies GuluSearchCampaign;
+const now=new Date().toISOString();
+const campaign={id:'campaign-1',jobId:'job-1',ruleVersion:1,version:1,status:'confirmed' as const,summary:'adaptive',sourceNotes:'',targetShortlist:5,maxUniqueCandidates:120,maxSteps:8,confirmedAt:now,createdAt:now,updatedAt:now,steps:[step('company',0,'companies','阿里云'),step('role-1',1,'roles','海外销售经理'),step('role-2',2,'roles','国际销售经理'),step('city',3,'cities','上海'),step('industry',4,'industries','SaaS')]} satisfies GuluSearchCampaign;
 
 describe('adaptive AND probe planner',()=>{
   it('adds the highest-priority unused dimension when a seed is too broad',()=>{

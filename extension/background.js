@@ -94,6 +94,12 @@ function campaignCandidateEventId(task, step, seed) {
   return `candidate:${task.id}:${step.id}:${seed.guluId}`;
 }
 
+function campaignFilterKey(filters) {
+  return ['keywords','companies','roles','cities','industries','functions']
+    .map((field) => `${field}:${[...(filters?.[field] ?? [])].map(String).sort().join(',')}`)
+    .join('|');
+}
+
 function resumeSoon() {
   chrome.alarms.create('gulu-resume', { when: Date.now() + 1000 });
 }
@@ -102,16 +108,12 @@ async function waitListSettled(tabId, expectedPage, { minimumDelay = 0, previous
   const started = Date.now();
   let stableSignature = null;
   let stableCount = 0;
-  let zeroCount = 0;
   let lastState = null;
   for (let attempt = 0; attempt < 150; attempt += 1) {
     await delay(400);
     const state = await send(tabId, 'inspectListState');
     lastState = state;
     const changed = state.empty || previousSignature === null || state.signature !== previousSignature;
-    const stableZero = !state.loading && state.queryReady && state.page === expectedPage && state.count === 0 && Date.now() - started >= minimumDelay;
-    zeroCount = stableZero ? zeroCount + 1 : 0;
-    if (zeroCount >= 10) return { ...state, empty: true, resultReady: true, inferredEmpty: true };
     if (!state.loading && state.queryReady && state.resultReady && state.page === expectedPage && changed && Date.now() - started >= minimumDelay) {
       stableCount = state.signature === stableSignature ? stableCount + 1 : 1;
       stableSignature = state.signature;
@@ -195,6 +197,14 @@ async function runCampaignTask({ task, campaign, steps, step }) {
     await event(task.id, 'needs_attention', { error: state.state }, `attention:${task.id}:${state.state}`);
     return;
   }
+  const forbidden = await send(tab.id, 'inspectForbiddenFilters');
+  if (!forbidden.safe) throw new Error(`forbidden_search_scope:${forbidden.filters.join(',')}`);
+  const applied = await send(tab.id, 'inspectAppliedFilters', { filters: step.filters });
+  if (!applied.safe) throw new Error(`campaign_filters_unverified:missing=${applied.missing.join(',')},empty=${applied.emptyClauses.join(',')}`);
+  if (!Number.isInteger(applied.total)) throw new Error('campaign_result_total_unavailable');
+  const probe = await event(task.id, 'step_probed', { stepId: step.id, resultCount: applied.total, filters: step.filters }, `probe:${task.id}:${step.id}:${campaignFilterKey(step.filters)}`);
+  if (probe.action !== 'read') { resumeSoon();return; }
+  if (applied.total < 1 || applied.total > 100) throw new Error(`campaign_read_window_invalid:${applied.total}`);
   if (progress.status === 'pending') await event(task.id, 'step_started', { stepId: step.id }, `step-start:${task.id}:${step.id}`);
   const list = await send(tab.id, 'readList', { page: progress.page });
   if (list.length === 0) {
@@ -397,6 +407,9 @@ async function runOnce() {
         'candidate_scope_unavailable',
         'candidate_scope_not_all_talent',
         'forbidden_search_scope',
+        'campaign_filters_unverified',
+        'campaign_result_total_unavailable',
+        'campaign_read_window_invalid',
         'adapter_timeout',
       ].some((code) => message === code || message.startsWith(`${code}:`));
       await event(
