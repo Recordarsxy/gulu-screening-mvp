@@ -9,6 +9,16 @@ const now=new Date().toISOString();
 const campaign={id:'campaign-1',jobId:'job-1',ruleVersion:1,version:1,status:'confirmed' as const,summary:'adaptive',sourceNotes:'',targetShortlist:5,maxUniqueCandidates:120,maxSteps:8,confirmedAt:now,createdAt:now,updatedAt:now,steps:[step('company',0,'companies','阿里云'),step('role-1',1,'roles','海外销售经理'),step('role-2',2,'roles','国际销售经理'),step('city',3,'cities','上海'),step('industry',4,'industries','SaaS')]} satisfies GuluSearchCampaign;
 
 describe('adaptive AND probe planner',()=>{
+  it('switches to the next same-field alternative after an empty seed',()=>{
+    const companyStep={...step('company',0,'companies','Alpha Fund'),filters:filters({companies:['Alpha Fund','Beta Fund','Gamma Fund']})};
+    const alternativeCampaign={...campaign,steps:[companyStep,...campaign.steps.slice(1)]};
+    const current=filters({companies:['Alpha Fund']});
+    expect(planAdaptiveProbe({campaign:alternativeCampaign,seedStepId:'company',currentFilters:current,resultCount:0,triedFingerprints:[]})).toMatchObject({
+      action:'refine',
+      filters:filters({companies:['Beta Fund']}),
+      rationale:'empty_combination',
+    });
+  });
   it('adds the highest-priority unused dimension when a seed is too broad',()=>{
     expect(planAdaptiveProbe({campaign,seedStepId:'company',currentFilters:filters({companies:['阿里云']}),resultCount:374,triedFingerprints:[]})).toMatchObject({action:'refine',filters:filters({companies:['阿里云'],roles:['海外销售经理']})});
   });

@@ -3,7 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { GuluCandidateSnapshotSchema, GuluConnectorTaskSchema, GuluSearchCampaignSchema, GuluSearchFitSchema, GuluSearchPlanSchema, GuluSearchStepSchema, GuluStepProgressSchema, type GuluConnectorTask, type GuluSearchCampaign, type GuluSearchPlan, type GuluSearchStep, type GuluStepProgress } from '../../shared/contracts.js';
 import { getCurrentVersion } from './job-pack.js';
 import {lintCampaign,searchFingerprint} from './gulu-campaign.js';
-import {planAdaptiveProbe} from './adaptive-search.js';
+import {atomicSearchFilters,planAdaptiveProbe} from './adaptive-search.js';
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 const constantEqual = (left:string,right:string) => {
@@ -77,7 +77,7 @@ export class GuluService {
     const campaign=this.getCampaign(jobId,campaignId);if(campaign.status!=='confirmed')throw new Error('campaign_not_confirmed');const pack=getCurrentVersion(this.db,jobId);if(!pack||pack.approval.status!=='approved')throw new Error('rules_not_approved');if(pack.rule_version!==campaign.ruleVersion)throw new Error('campaign_outdated');
     const active=this.db.prepare("SELECT 1 ok FROM gulu_tasks WHERE job_id=? AND status IN ('queued','running','paused','needs_attention')").get(jobId);if(active)throw new Error('gulu_task_already_active');
     const enabled=campaign.steps.filter(step=>step.enabled).sort((a,b)=>a.order-b.order);const id=randomUUID();
-    this.db.exec('BEGIN');try{this.db.prepare(`INSERT INTO gulu_tasks(id,job_id,rule_version,plan_version,plan_json,status,mode,campaign_id,campaign_version,phase,current_step_index) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(id,jobId,campaign.ruleVersion,campaign.version,JSON.stringify(campaign),'queued','formal',campaign.id,campaign.version,'preflight',0);const insert=this.db.prepare('INSERT INTO gulu_task_steps(task_id,step_id,position,step_json) VALUES (?,?,?,?)');enabled.forEach((step,index)=>insert.run(id,step.id,index,JSON.stringify(step)));this.db.exec('COMMIT')}catch(error){this.db.exec('ROLLBACK');throw error}return this.getTask(id);
+    this.db.exec('BEGIN');try{this.db.prepare(`INSERT INTO gulu_tasks(id,job_id,rule_version,plan_version,plan_json,status,mode,campaign_id,campaign_version,phase,current_step_index) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(id,jobId,campaign.ruleVersion,campaign.version,JSON.stringify(campaign),'queued','formal',campaign.id,campaign.version,'preflight',0);const insert=this.db.prepare('INSERT INTO gulu_task_steps(task_id,step_id,position,step_json) VALUES (?,?,?,?)');enabled.forEach((step,index)=>insert.run(id,step.id,index,JSON.stringify({...step,filters:atomicSearchFilters(step.filters)})));this.db.exec('COMMIT')}catch(error){this.db.exec('ROLLBACK');throw error}return this.getTask(id);
   }
 
   startTask(jobId:string,mode:'dry-run'|'pilot'|'formal'='dry-run'):GuluConnectorTask {

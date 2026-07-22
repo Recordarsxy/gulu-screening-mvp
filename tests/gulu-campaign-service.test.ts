@@ -18,6 +18,13 @@ describe('Gulu campaign service',()=>{
     expect(task).toMatchObject({campaignId:'campaign-1',campaignVersion:1,phase:'preflight',currentStepIndex:0,currentStepId:'company-seed',shortlistedCount:0,completionReason:null});
     expect(service.getTaskSteps(task.id)).toEqual([expect.objectContaining({stepId:'company-seed',status:'pending'}),expect.objectContaining({stepId:'role-cluster',status:'pending'})]);
   });
+  it('stores one atomic value per filter field when a campaign step has alternatives',()=>{
+    const {service}=setup();
+    const multiCompany={...draft,steps:[{...draft.steps[0],filters:filters({companies:['Alpha Fund','Beta Fund','Gamma Fund']})},draft.steps[1]]};
+    service.saveCampaign(multiCompany);service.confirmCampaign('job-1','campaign-1',multiCompany);
+    const task=service.startCampaignTask('job-1','campaign-1');
+    expect(service.getCurrentCampaignStep(task.id)?.filters.companies).toEqual(['Alpha Fund']);
+  });
   it('persists step progress, search fit and an exhausted completion reason',()=>{
     const {db,service}=setup();service.saveCampaign(draft);service.confirmCampaign('job-1','campaign-1',draft);let task=service.startCampaignTask('job-1','campaign-1');
     service.startStep(task.id,'company-seed');db.prepare(`INSERT INTO candidates(id,job_id,dedupe_key,name,current_company,current_role,experiences_json) VALUES (?,?,?,?,?,?,?)`).run('candidate-1','job-1','c-1','候选人','示例公司','海外销售','[]');service.recordSearchFit(task.id,'candidate-1','company-seed',{score:82,evidence:['海外销售'],gaps:[],model:'deepseek',inputTokens:1,outputTokens:1});
