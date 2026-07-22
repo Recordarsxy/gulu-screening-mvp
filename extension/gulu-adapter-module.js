@@ -7,6 +7,7 @@ export const inspectState=adapter.inspectState;
 export const inspectCandidateScope=adapter.inspectCandidateScope;
 export const ensureAllTalentScope=adapter.ensureAllTalentScope;
 export const inspectForbiddenFilters=adapter.inspectForbiddenFilters;
+export const inspectAppliedFilters=adapter.inspectAppliedFilters;
 export const inspectListState=adapter.inspectListState;
 export const resetFilters=adapter.resetFilters;
 export const applyFilters=adapter.applyFilters;

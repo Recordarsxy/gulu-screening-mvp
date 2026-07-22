@@ -120,7 +120,7 @@ describe('Chrome extension safety boundary', () => {
 
   it('exposes only semantic read operations and strips forbidden fields', async () => {
     const adapter = await import('../extension/gulu-adapter-module.js');
-    expect(adapter.SEMANTIC_OPERATIONS).toEqual(['inspectState','inspectCandidateScope','ensureAllTalentScope','inspectForbiddenFilters','inspectListState','resetFilters','applyFilters','applyFilterValue','submitSearch','readList','openDetail','readDetail','nextPage']);
+    expect(adapter.SEMANTIC_OPERATIONS).toEqual(['inspectState','inspectCandidateScope','ensureAllTalentScope','inspectForbiddenFilters','inspectAppliedFilters','inspectListState','resetFilters','applyFilters','applyFilterValue','submitSearch','readList','openDetail','readDetail','nextPage']);
     const safe=adapter.sanitizeSnapshot({guluId:'1',name:'甲',detailUrl:'http://121.43.105.7/crm#candidate/detail?id=1',company:'示例',role:'经理',phone:'13800000000',email:'a@b.com',notes:'秘密',sourceRound:'role',page:1,capturedAt:new Date().toISOString()});
     expect(safe).not.toHaveProperty('phone');expect(safe).not.toHaveProperty('email');expect(safe).not.toHaveProperty('notes');
     expect(Object.keys(safe).sort()).toEqual(expect.arrayContaining(['guluId','name','detailUrl','company','role']));
