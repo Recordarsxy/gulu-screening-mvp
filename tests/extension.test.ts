@@ -10,6 +10,7 @@ describe('Chrome extension safety boundary', () => {
     expect(source).toContain("state.state === 'loading'");
     expect(source).toContain('for (let current = 1; current < page; current += 1)');
     expect(source).toContain("task.mode === 'pilot' && totalRead >= 5");
+    expect(source).toContain("tab?.url?.startsWith('http://121.43.105.7/')");
   });
 
   it('keeps a diagnostic listener available when the page adapter cannot load', async()=>{

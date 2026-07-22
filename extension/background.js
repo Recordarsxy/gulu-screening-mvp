@@ -50,7 +50,7 @@ async function ensureTab() {
   if (saved.guluTabId) {
     try {
       const tab = await chrome.tabs.get(saved.guluTabId);
-      if (tab) return tab;
+      if (tab?.url?.startsWith('http://121.43.105.7/')) return tab;
     } catch {}
   }
   const found = await chrome.tabs.query({ url: 'http://121.43.105.7/*' });
