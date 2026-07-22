@@ -140,8 +140,20 @@ async function restoreList(tabId, round, page, submit) {
 
   await send(tabId, 'resetFilters');
   const beforeQuery = await send(tabId, 'inspectListState');
-  await send(tabId, 'applyFilters', { filters: round.filters, submit, reset: false });
-  if (!submit) return { state: 'list' };
+  if (!submit) {
+    await send(tabId, 'applyFilters', { filters: round.filters, submit: false, reset: false });
+    return { state: 'list' };
+  }
+  for (const field of ['keywords','companies','roles','cities','industries','functions']) {
+    const values = Array.isArray(round.filters?.[field]) ? round.filters[field] : [];
+    for (const value of values) {
+      await send(tabId, 'applyFilterValue', { field, value });
+      await delay(600);
+      const filterState = await waitReady(tabId, `filter-${field}`);
+      if (filterState.state !== 'list') throw new Error(filterState.state);
+    }
+  }
+  await send(tabId, 'submitSearch');
   await waitListSettled(tabId, 1, { minimumDelay: 2500, previousSignature: beforeQuery.signature });
 
   for (let current = 1; current < page; current += 1) {
