@@ -101,9 +101,11 @@ async function waitListSettled(tabId, expectedPage, { minimumDelay = 0, previous
   const started = Date.now();
   let stableSignature = null;
   let stableCount = 0;
+  let lastState = null;
   for (let attempt = 0; attempt < 150; attempt += 1) {
     await delay(400);
     const state = await send(tabId, 'inspectListState');
+    lastState = state;
     const changed = state.empty || previousSignature === null || state.signature !== previousSignature;
     if (!state.loading && state.queryReady && state.resultReady && state.page === expectedPage && changed && Date.now() - started >= minimumDelay) {
       stableCount = state.signature === stableSignature ? stableCount + 1 : 1;
@@ -113,7 +115,8 @@ async function waitListSettled(tabId, expectedPage, { minimumDelay = 0, previous
       stableCount = 0;
     }
   }
-  throw new Error('list_not_settled');
+  const changed = Boolean(lastState?.empty || previousSignature === null || lastState?.signature !== previousSignature);
+  throw new Error(`list_not_settled:page=${lastState?.page ?? 'unknown'},expected=${expectedPage},loading=${Boolean(lastState?.loading)},queryReady=${Boolean(lastState?.queryReady)},resultReady=${Boolean(lastState?.resultReady)},empty=${Boolean(lastState?.empty)},changed=${changed},count=${Number(lastState?.count ?? 0)}`);
 }
 
 async function restoreList(tabId, round, page, submit) {
