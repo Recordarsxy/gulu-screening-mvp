@@ -5,6 +5,25 @@ let active = false;
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const pace = () => delay(800 + Math.floor(Math.random() * 701));
 
+async function reloadIfUpdated() {
+  try {
+    const response = await fetch(chrome.runtime.getURL('revision.txt'), { cache: 'no-store' });
+    const revision = (await response.text()).trim();
+    if (!revision) return false;
+    const { extensionRevision } = await chrome.storage.local.get(['extensionRevision']);
+    if (!extensionRevision) {
+      await chrome.storage.local.set({ extensionRevision: revision });
+      return false;
+    }
+    if (extensionRevision !== revision) {
+      await chrome.storage.local.set({ extensionRevision: revision });
+      chrome.runtime.reload();
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
 async function stored() {
   return chrome.storage.local.get(['connectorToken', 'guluTabId', 'lastTaskId']);
 }
@@ -201,6 +220,7 @@ async function runOnce() {
     }).catch(() => {});
     return;
   }
+  if (await reloadIfUpdated()) return;
   active = true;
   let currentTask = null;
   try {

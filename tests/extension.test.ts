@@ -33,6 +33,16 @@ describe('Chrome extension safety boundary', () => {
     expect(source).toContain('extensionVersion: chrome.runtime.getManifest().version');
   });
 
+  it('reloads an unpacked extension automatically after its revision changes',async()=>{
+    const source=await readFile(new URL('../extension/background.js',import.meta.url),'utf8');
+    const revision=(await readFile(new URL('../extension/revision.txt',import.meta.url),'utf8')).trim();
+    expect(revision).toMatch(/^v1\.3\.0-/);
+    expect(source).toContain("chrome.runtime.getURL('revision.txt')");
+    expect(source).toContain("cache: 'no-store'");
+    expect(source).toContain('chrome.runtime.reload()');
+    expect(source.indexOf('if (active) {')).toBeLessThan(source.indexOf('await reloadIfUpdated()'));
+  });
+
   it('records round completion and resumes the role round immediately',async()=>{
     const source=await readFile(new URL('../extension/background.js',import.meta.url),'utf8');
     expect(source).toContain("'round_started'");
