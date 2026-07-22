@@ -373,7 +373,7 @@ async function runOnce() {
         'permission_denied',
         'candidate_scope_unavailable',
         'candidate_scope_not_all_talent',
-      ].includes(message);
+      ].some((code) => message === code || message.startsWith(`${code}:`));
       await event(
         currentTask.id,
         immediateAttention ? 'needs_attention' : 'failure',
