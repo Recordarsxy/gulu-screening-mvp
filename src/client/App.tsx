@@ -26,6 +26,14 @@ const terminalTask = (status: string) =>
   ["completed", "stopped", "failed"].includes(status);
 const roundSummary = (round: GuluPlan["rounds"][number]) =>
   Object.values(round.filters).flat().join("，") || "未设置标签";
+const resetMessages: Record<ResetSection, string> = {
+  rules:
+    "将清空规则、搜索方案、运行记录和候选结果。岗位名称与原始 JD 会保留。",
+  runs:
+    "将清空搜索方案、运行任务、断点和策略记录。规则与候选结果会保留。",
+  results:
+    "将清空候选人、DeepSeek 判断和人工复核。规则与运行历史会保留。",
+};
 
 export function App() {
   const [view, setView] = useState<View>("jobs"),
@@ -53,6 +61,7 @@ export function App() {
   const [taskHistory, setTaskHistory] = useState<GuluTask[]>([]),
     [confirmFresh, setConfirmFresh] = useState(false),
     [archiveTarget, setArchiveTarget] = useState<JobSummary | null>(null),
+    [resetTarget, setResetTarget] = useState<ResetSection | null>(null),
     [resultsRunId, setResultsRunId] = useState("");
   const [changes, setChanges] = useState<JobChangeNote[]>([]),
     [changeText, setChangeText] = useState(""),
@@ -375,15 +384,6 @@ export function App() {
   };
   const resetSection = async (section: ResetSection) => {
     if (!selected) return;
-    const messages: Record<ResetSection, string> = {
-      rules:
-        "将清空规则、搜索方案、运行记录和候选结果。岗位名称与原始 JD 会保留。确定继续吗？",
-      runs:
-        "将清空搜索方案、运行任务、断点和策略记录。规则与候选结果会保留。确定继续吗？",
-      results:
-        "将清空候选人、DeepSeek 判断和人工复核。规则与运行历史会保留。确定继续吗？",
-    };
-    if (!window.confirm(messages[section])) return;
     setBusy(true);
     try {
       const summary = await api.resetSection(selected, section);
@@ -427,6 +427,7 @@ export function App() {
     } catch (e: any) {
       setNotice(e.message);
     } finally {
+      setResetTarget(null);
       setBusy(false);
     }
   };
@@ -612,7 +613,7 @@ export function App() {
                   </div>
                   <button
                     className="danger"
-                    onClick={() => resetSection("rules")}
+                    onClick={() => setResetTarget("rules")}
                     disabled={busy}
                   >
                     重置规则与全部下游数据
@@ -639,7 +640,7 @@ export function App() {
                   <div>
                     <button
                       className="danger"
-                      onClick={() => resetSection("rules")}
+                      onClick={() => setResetTarget("rules")}
                       disabled={busy}
                     >
                       重置规则与全部下游数据
@@ -729,7 +730,7 @@ export function App() {
                 <div className="section-actions">
                   <button
                     className="danger"
-                    onClick={() => resetSection("runs")}
+                    onClick={() => setResetTarget("runs")}
                     disabled={busy}
                   >
                     重置运行中心
@@ -891,7 +892,7 @@ export function App() {
             filter={filter}
             setFilter={setFilter}
             runId={resultsRunId}
-            onReset={() => resetSection("results")}
+            onReset={() => setResetTarget("results")}
             reload={() =>
               selected &&
               api
@@ -963,6 +964,37 @@ export function App() {
             onCancel={() => setConfirmFresh(false)}
             onConfirm={startFresh}
           />
+        )}{" "}
+        {resetTarget && (
+          <div
+            className="dialog-backdrop"
+            role="dialog"
+            aria-modal="true"
+            aria-label="确认重置"
+          >
+            <div className="new-task-dialog reset-dialog">
+              <p className="eyebrow">DESTRUCTIVE ACTION</p>
+              <h2>确认重置</h2>
+              <p>{resetMessages[resetTarget]}</p>
+              <p className="reset-warning">此操作无法撤销。</p>
+              <div className="dialog-actions">
+                <button
+                  className="ghost"
+                  onClick={() => setResetTarget(null)}
+                  disabled={busy}
+                >
+                  取消
+                </button>
+                <button
+                  className="danger"
+                  onClick={() => resetSection(resetTarget)}
+                  disabled={busy}
+                >
+                  确认重置
+                </button>
+              </div>
+            </div>
+          </div>
         )}{" "}
         {archiveTarget && (
           <div

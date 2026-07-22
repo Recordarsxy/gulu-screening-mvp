@@ -487,6 +487,13 @@
   color: #607985;
   margin: 4px 0 22px;
 }
+.reset-dialog {
+  max-width: 520px;
+}
+.reset-warning {
+  color: #b83b27;
+  font-weight: 700;
+}
 @media (max-width: 900px) {
   .campaign-metrics,
   .step-filters {
