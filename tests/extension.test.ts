@@ -60,10 +60,12 @@ describe('Chrome extension safety boundary', () => {
 
   it('reloads the neutral candidate list before applying each search plan',async()=>{
     const source=await readFile(new URL('../extension/background.js',import.meta.url),'utf8');
+    const restore=source.slice(source.indexOf('async function restoreList'),source.indexOf('async function runCampaignTask'));
     expect(source).toContain("chrome.tabs.update(tabId, { url: GULU }).catch(() => {});");
     expect(source).not.toContain("await chrome.tabs.update(tabId, { url: GULU });");
     expect(source).toContain('chrome.tabs.reload(tabId).catch(() => {});');
     expect(source).not.toContain('await chrome.tabs.reload(tabId);');
+    expect(restore.indexOf('chrome.tabs.reload(tabId)')).toBeLessThan(restore.indexOf('await waitReady(tabId)'));
     expect(source.indexOf('chrome.tabs.reload(tabId).catch(() => {});')).toBeLessThan(source.indexOf("await send(tabId, 'applyFilters'"));
   });
 
