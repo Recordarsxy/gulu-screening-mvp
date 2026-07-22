@@ -116,7 +116,12 @@ describe("DeepSeek adaptive campaign behavior", () => {
               objective: "验证公司",
               rationale: "目标公司",
               limit: 20,
+              keywords: ["vibe coding"],
               companies: ["阿里云"],
+              roles: ["海外销售经理"],
+              cities: ["北京"],
+              industries: ["SaaS"],
+              functions: ["销售"],
             },
             step("seed_company", "重复公司", { companies: ["阿里云"] }),
             step("manual", "空方向", {}),
@@ -139,6 +144,13 @@ describe("DeepSeek adaptive campaign behavior", () => {
         }),
       ]),
     );
+    expect(
+      result.data.steps.every(
+        (item) =>
+          Object.values(item.filters).filter((values) => values.length)
+            .length <= 3,
+      ),
+    ).toBe(true);
     expect(
       result.data.steps.every((item) =>
         Object.values(item.filters).some((values) => values.length),

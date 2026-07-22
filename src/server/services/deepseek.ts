@@ -426,7 +426,7 @@ export class DeepSeekProvider {
       const rawFilters = (
         item.filters && typeof item.filters === "object" ? item.filters : item
       ) as Record<string, unknown>;
-      const filters = Object.fromEntries(
+      const normalizedFilters = Object.fromEntries(
         Object.entries(empty).map(([key]) => [
           key,
           Array.isArray(rawFilters[key])
@@ -436,7 +436,27 @@ export class DeepSeekProvider {
                 .filter(Boolean)
             : [],
         ]),
-      );
+      ) as typeof empty;
+      const inferredType = normalizedFilters.companies.length
+        ? "seed_company"
+        : normalizedFilters.roles.length
+          ? "role_cluster"
+          : normalizedFilters.industries.length
+            ? "market_cluster"
+            : "manual";
+      const priorities: Record<string, Array<keyof typeof empty>> = {
+        seed_company: ["companies", "roles", "cities"],
+        role_cluster: ["roles", "industries", "cities"],
+        market_cluster: ["industries", "roles", "cities"],
+        manual: ["keywords", "roles", "cities"],
+      };
+      const keep = new Set(priorities[inferredType]);
+      const filters = Object.fromEntries(
+        Object.entries(normalizedFilters).map(([key, values]) => [
+          key,
+          keep.has(key as keyof typeof empty) ? values : [],
+        ]),
+      ) as typeof empty;
       const sources = Object.entries(filters).flatMap(([field, values]) =>
         (values as string[]).map((value) => ({
           kind: field === "companies" ? "deepseek" : "approved_rule",
@@ -452,7 +472,7 @@ export class DeepSeekProvider {
         ...item,
         id: String(item.id ?? randomUUID()),
         order: index,
-        type: item.type ?? "manual",
+        type: item.type ?? inferredType,
         title: item.title ?? `搜索步骤 ${index + 1}`,
         objective: item.objective ?? String(item.title ?? "验证人才方向"),
         rationale: item.rationale ?? "基于批准岗位规则生成",
