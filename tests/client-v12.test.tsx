@@ -73,4 +73,10 @@ describe("v1.2 non-technical workflow UI", () => {
     expect(source).not.toContain("<FreshTaskReadiness");
     expect(source).toContain("<CampaignPanel");
   });
+  it("routes every asynchronous app action through visible busy feedback",async()=>{
+    const source=await readFile(new URL("../src/client/App.tsx",import.meta.url),"utf8");
+    expect(source).toContain("const beginBusy");
+    expect(source).toContain("正在处理，请稍候");
+    expect(source.match(/setBusy\(true\);/g)).toHaveLength(1);
+  });
 });

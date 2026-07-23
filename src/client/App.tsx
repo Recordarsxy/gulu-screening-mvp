@@ -49,6 +49,11 @@ export function App() {
       "寻找具备大型制造企业客户拓展经验，能够负责关键客户增长的销售经理。",
     ),
     [file, setFile] = useState<File | null>(null);
+  const [busyAction,setBusyAction]=useState<string|null>(null);
+  const beginBusy=(action="general",label="正在处理，请稍候…")=>{
+    setBusyAction(action);setNotice(label);setBusy(true);
+  };
+  const endBusy=()=>{setBusyAction(null);setBusy(false)};
   const [demo, setDemo] = useState<RunRecord | null>(null),
     [connector, setConnector] = useState<ConnectorStatus | null>(null),
     [pairing, setPairing] = useState<{
@@ -122,7 +127,7 @@ export function App() {
     return () => clearInterval(timer);
   }, [task?.id, task?.status]);
   const openJob = async (id: string, next: View = "rules") => {
-    setBusy(true);
+    beginBusy();
     try {
       const [data, savedPlan, changeData, runData] = await Promise.all([
         api.getJob(id),
@@ -160,11 +165,11 @@ export function App() {
     } catch (e: any) {
       setNotice(e.message);
     } finally {
-      setBusy(false);
+      endBusy();
     }
   };
   const create = async () => {
-    setBusy(true);
+    beginBusy();
     setNotice("DeepSeek 正在分析岗位要求，最长约 60 秒，请勿重复点击。");
     try {
       const created = file
@@ -188,7 +193,7 @@ export function App() {
           : "DeepSeek 未能生成有效岗位包，请检查连接后重试",
       );
     } finally {
-      setBusy(false);
+      endBusy();
     }
   };
   const updateList = (key: string, value: string[]) =>
@@ -201,7 +206,7 @@ export function App() {
     }));
   const save = async () => {
     if (!pack) return;
-    setBusy(true);
+    beginBusy();
     try {
       const next = await api.revise(selected, pack);
       setPack(next);
@@ -209,12 +214,12 @@ export function App() {
     } catch (e: any) {
       setNotice(e.message);
     } finally {
-      setBusy(false);
+      endBusy();
     }
   };
   const approve = async () => {
     if (!pack) return;
-    setBusy(true);
+    beginBusy();
     try {
       setPack(await api.approve(selected, pack.rule_version));
       setNotice("规则已批准，可以生成谷露搜索计划。");
@@ -222,42 +227,43 @@ export function App() {
     } catch (e: any) {
       setNotice(e.message);
     } finally {
-      setBusy(false);
+      endBusy();
     }
   };
   const addChange = async () => {
     if (!changeText.trim()) return;
-    setBusy(true);
+    beginBusy("analyze-change","DeepSeek 正在分析岗位变化及其影响栏目，请稍候…");
     try {
-      await api.createChange(selected, changeText);
+      const created=await api.createChange(selected, changeText);
       setChanges((await api.listChanges(selected)).items);
       setChangeText("");
-      setNotice("岗位变化已保存，整合后会生成新规则版本。");
+      setNotice(`岗位变化已分析并保存：${created.analysis?.summary??"等待整合"}`);
     } catch (e: any) {
-      setNotice(e.message);
+      setNotice(`岗位变化分析失败：${e.message}。输入已保留，可以重试。`);
     } finally {
-      setBusy(false);
+      endBusy();
     }
   };
   const integrateChanges = async () => {
     const ids = changes.filter((x) => !x.appliedRuleVersion).map((x) => x.id);
     if (!ids.length) return;
-    setBusy(true);
+    beginBusy("integrate-changes",`正在整合 ${ids.length} 条变化并生成新规则版本，请稍候…`);
     try {
       const next = await api.integrateChanges(selected, ids);
       setPack(next);
       setChanges((await api.listChanges(selected)).items);
       setPlan(null);
       setCampaign(null);
-      setNotice(`岗位变化已整合为规则 v${next.rule_version}，请审核批准。`);
+      const affected=new Set(changes.filter(item=>ids.includes(item.id)).flatMap(item=>item.analysis?.impacts.map(impact=>impact.section)??[]));
+      setNotice(`岗位变化已整合为规则 v${next.rule_version}，更新 ${affected.size} 个栏目，请审核批准。`);
     } catch (e: any) {
-      setNotice(e.message);
+      setNotice(`岗位变化整合失败：${e.message}。变化记录仍已保留，可以重试。`);
     } finally {
-      setBusy(false);
+      endBusy();
     }
   };
   const generatePlan = async () => {
-    setBusy(true);
+    beginBusy();
     try {
       const next = await api.generateGuluPlan(selected);
       setPlan(next);
@@ -266,12 +272,12 @@ export function App() {
     } catch (e: any) {
       setNotice(e.message);
     } finally {
-      setBusy(false);
+      endBusy();
     }
   };
   const importPlan = async () => {
     if (!sourceNotes.trim()) return;
-    setBusy(true);
+    beginBusy();
     try {
       setPlan(await api.importGuluPlan(selected, sourceNotes));
       setEditingPlan(false);
@@ -279,12 +285,12 @@ export function App() {
     } catch (e: any) {
       setNotice(e.message);
     } finally {
-      setBusy(false);
+      endBusy();
     }
   };
   const savePlanDraft = async () => {
     if (!plan) return;
-    setBusy(true);
+    beginBusy();
     try {
       setPlan(await api.saveGuluPlanDraft(selected, plan));
       setEditingPlan(false);
@@ -292,12 +298,12 @@ export function App() {
     } catch (e: any) {
       setNotice(e.message);
     } finally {
-      setBusy(false);
+      endBusy();
     }
   };
   const confirmPlan = async () => {
     if (!plan) return;
-    setBusy(true);
+    beginBusy();
     try {
       setPlan(await api.confirmGuluPlan(selected, plan));
       setEditingPlan(false);
@@ -305,11 +311,11 @@ export function App() {
     } catch (e: any) {
       setNotice(e.message);
     } finally {
-      setBusy(false);
+      endBusy();
     }
   };
   const startGulu = async (mode: GuluTask["mode"]) => {
-    setBusy(true);
+    beginBusy();
     try {
       const next = await api.startGulu(selected, mode);
       setTask(next);
@@ -324,11 +330,11 @@ export function App() {
     } catch (e: any) {
       setNotice(e.message);
     } finally {
-      setBusy(false);
+      endBusy();
     }
   };
   const startFresh = async () => {
-    setBusy(true);
+    beginBusy();
     try {
       const next = await api.startGulu(selected, "formal", true);
       setTask(next);
@@ -341,11 +347,11 @@ export function App() {
     } catch (e: any) {
       setNotice(e.message);
     } finally {
-      setBusy(false);
+      endBusy();
     }
   };
   const showRunResults = async (run: GuluTask) => {
-    setBusy(true);
+    beginBusy();
     try {
       setResults((await api.results(selected, run.id)).items);
       setResultsRunId(run.id);
@@ -353,12 +359,12 @@ export function App() {
     } catch (e: any) {
       setNotice(e.message);
     } finally {
-      setBusy(false);
+      endBusy();
     }
   };
   const archiveSelected = async () => {
     if (!archiveTarget) return;
-    setBusy(true);
+    beginBusy();
     try {
       await api.archiveJob(archiveTarget.id);
       if (selected === archiveTarget.id) {
@@ -378,11 +384,11 @@ export function App() {
           : e.message,
       );
     } finally {
-      setBusy(false);
+      endBusy();
     }
   };
   const restoreArchived = async (job: JobSummary) => {
-    setBusy(true);
+    beginBusy();
     try {
       await api.restoreJob(job.id);
       await refreshJobs();
@@ -390,12 +396,12 @@ export function App() {
     } catch (e: any) {
       setNotice(e.message);
     } finally {
-      setBusy(false);
+      endBusy();
     }
   };
   const resetSection = async (section: ResetSection) => {
     if (!selected) return;
-    setBusy(true);
+    beginBusy();
     try {
       const summary = await api.resetSection(selected, section);
       if (section === "rules") {
@@ -439,12 +445,12 @@ export function App() {
       setNotice(e.message);
     } finally {
       setResetTarget(null);
-      setBusy(false);
+      endBusy();
     }
   };
   const regenerateRules = async () => {
     if (!selected) return;
-    setBusy(true);
+    beginBusy();
     setNotice("DeepSeek 正在根据保留的岗位资料重新生成规则…");
     try {
       setPack(await api.regenerateRules(selected));
@@ -453,7 +459,7 @@ export function App() {
     } catch (e: any) {
       setNotice(e.message);
     } finally {
-      setBusy(false);
+      endBusy();
     }
   };
   const activeTask = Boolean(task && !terminalTask(task.status));
@@ -709,6 +715,7 @@ export function App() {
                   setText={setChangeText}
                   onSave={addChange}
                   onIntegrate={integrateChanges}
+                  busyAction={busyAction}
                 />
                 {task && task.ruleVersion !== pack.rule_version && (
                   <p className="notice">
@@ -1124,18 +1131,24 @@ export function RuleList({
     </div>
   );
 }
-function JobChangesPanel({
+const changeSectionLabels:Record<string,string>={
+  "constraints.hard":"硬条件","constraints.soft":"加分项","companies.target":"目标公司","roles.exact":"目标职位",
+  "evidence.required":"正面证据","evidence.negative":"明确反证","questions":"待确认问题",
+};
+export function JobChangesPanel({
   changes,
   text,
   setText,
   onSave,
   onIntegrate,
+  busyAction,
 }: {
   changes: JobChangeNote[];
   text: string;
   setText: (v: string) => void;
   onSave: () => void;
   onIntegrate: () => void;
+  busyAction:string|null;
 }) {
   const pending = changes.filter((x) => !x.appliedRuleVersion);
   return (
@@ -1154,15 +1167,15 @@ function JobChangesPanel({
         placeholder="例如：客户新增要求、目标公司变化、必须经验调整…"
       />
       <div className="action-bar">
-        <button className="ghost" onClick={onSave} disabled={!text.trim()}>
-          保存变化
+        <button className="ghost" onClick={onSave} disabled={!text.trim()||Boolean(busyAction)}>
+          {busyAction==="analyze-change"?"DeepSeek 正在分析…":"分析并保存变化"}
         </button>
         <button
           className="accent"
           onClick={onIntegrate}
-          disabled={!pending.length}
+          disabled={!pending.length||Boolean(busyAction)}
         >
-          整合 {pending.length || 0} 条变化为新版本
+          {busyAction==="integrate-changes"?`正在整合 ${pending.length} 条变化…`:`整合 ${pending.length || 0} 条变化为新版本`}
         </button>
       </div>
       {changes.length > 0 && (
@@ -1170,6 +1183,14 @@ function JobChangesPanel({
           {changes.map((item) => (
             <div key={item.id}>
               <p>{item.text}</p>
+              {item.analysis&&<div className="change-analysis">
+                <strong>DeepSeek 分析：{item.analysis.summary}</strong>
+                <p>影响栏目：{[...new Set(item.analysis.impacts.map(impact=>changeSectionLabels[impact.section]??impact.section))].join("、")||"待确认问题"}</p>
+                {item.analysis.impacts.map((impact,index)=><p key={`${impact.section}-${index}`}>
+                  <b>{changeSectionLabels[impact.section]??impact.section}</b> · {impact.values.join("、")||impact.reason}
+                </p>)}
+                {item.analysis.questions.length>0&&<p><b>待确认：</b>{item.analysis.questions.join("；")}</p>}
+              </div>}
               <small>
                 {item.appliedRuleVersion
                   ? `已应用到规则 v${item.appliedRuleVersion}`
