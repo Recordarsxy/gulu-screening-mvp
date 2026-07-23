@@ -120,6 +120,21 @@ describe("DeepSeek adaptive campaign behavior", () => {
     });
   });
   it("ignores alternate model total fields and calculates the structured search fit",async()=>{const provider=new DeepSeekProvider({apiKey:"test",fetcher:async()=>response({search_fit:99,dimensions:fitDimensions([10,5,0,5,0,0,0]),verification_questions:["海外B2B经验","明确业绩"]})});const pack=makeDefaultJobPack("job-1","海外销售","JD");await expect(provider.scoreSearchFit(pack,{currentCompany:"示例公司",currentRole:"大客户经理",experiences:[]})).resolves.toMatchObject({score:20,verificationQuestions:["海外B2B经验","明确业绩"],model:"deepseek-test"});});
+  it("normalizes equivalent numeric confidence and scalar evidence fields",async()=>{
+    const dimensions=fitDimensions([25,17,12,12,12,4,2]).map((item,index)=>({
+      ...item,
+      confidence:index===0?90:index===1?0.5:20,
+      evidence:item.evidence.join(""),
+      gaps:item.gaps.join(""),
+    }));
+    const provider=new DeepSeekProvider({apiKey:"test",fetcher:async()=>response({dimensions,verificationQuestions:[]})});
+    const pack=makeDefaultJobPack("job-1","Overseas Sales","JD");
+    const fit=await provider.scoreSearchFit(pack,{currentCompany:"Example SaaS",currentRole:"International Sales",experiences:[]});
+    expect(fit.score).toBe(84);
+    expect(fit.dimensions.slice(0,3).map(item=>item.confidence)).toEqual(["high","medium","low"]);
+    expect(fit.dimensions[0].evidence).toEqual(["core_capability evidence"]);
+    expect(fit.dimensions[0].gaps).toEqual([]);
+  });
   it("repairs empty or duplicate model steps with approved-rule fallbacks", async () => {
     const provider = new DeepSeekProvider({
       apiKey: "test",

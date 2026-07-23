@@ -653,10 +653,23 @@ export class DeepSeekProvider {
     };
     const normalize = (result: DeepSeekResult<unknown>): GuluSearchFit => {
       const raw = result.data as Record<string, unknown>;
+      const normalizeConfidence=(value:unknown)=>{
+        if(value==='low'||value==='medium'||value==='high')return value;
+        const numeric=typeof value==='number'?value:typeof value==='string'&&value.trim()!==''?Number(value):Number.NaN;
+        if(!Number.isFinite(numeric))return value;
+        const ratio=numeric>1?numeric/100:numeric;
+        return ratio>=0.67?'high':ratio>=0.34?'medium':'low';
+      };
+      const normalizeList=(value:unknown)=>typeof value==='string'?(value.trim()?[value.trim()]:[]):value;
+      const normalizedDimensions=Array.isArray(raw.dimensions)?raw.dimensions.map(value=>{
+        if(!value||typeof value!=='object'||Array.isArray(value))return value;
+        const item=value as Record<string,unknown>;
+        return{...item,confidence:normalizeConfidence(item.confidence),evidence:normalizeList(item.evidence),gaps:normalizeList(item.gaps)};
+      }):raw.dimensions;
       const dimensions = z
         .array(MatchDimensionScoreSchema)
         .length(7)
-        .parse(raw.dimensions);
+        .parse(normalizedDimensions);
       const score = calculateSearchFit(dimensions);
       const evidence = [
         ...new Set(dimensions.flatMap((item) => item.evidence)),
