@@ -1,8 +1,48 @@
 import { describe, expect, it } from 'vitest';
 import { DeepSeekError, DeepSeekProvider } from '../src/server/services/deepseek.js';
 import { makeDefaultJobPack } from '../src/server/services/job-pack.js';
+import { MATCH_POLICY_VERSION } from '../src/server/services/match-policy.js';
 
 describe('DeepSeek provider', () => {
+  it('calculates search fit from evidence-backed dimensions instead of trusting the model total', async () => {
+    const dimensions = [
+      {id:'core_capability',earned:22,possible:25,confidence:'high',evidence:['负责渠道销售团队'],gaps:['缺少完整团队规模']},
+      {id:'market_customer',earned:15,possible:20,confidence:'medium',evidence:['服务企业客户'],gaps:['目标区域未明确']},
+      {id:'product_industry',earned:10,possible:15,confidence:'medium',evidence:['科技产品销售'],gaps:['细分赛道待核实']},
+      {id:'scope_level',earned:12,possible:15,confidence:'high',evidence:['销售负责人'],gaps:['汇报线待核实']},
+      {id:'outcome_evidence',earned:10,possible:15,confidence:'medium',evidence:['完成年度增长目标'],gaps:['缺少具体增幅']},
+      {id:'transferable_signals',earned:4,possible:5,confidence:'high',evidence:['从0到1搭建渠道'],gaps:['方法论细节不足']},
+      {id:'interview_only',earned:2,possible:5,confidence:'low',evidence:['有跨部门协作描述'],gaps:['动机与薪资需面试确认']},
+    ];
+    const fetcher:typeof fetch=async()=>new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({score:99,dimensions,verificationQuestions:['确认团队规模','确认求职动机']})}}],usage:{prompt_tokens:20,completion_tokens:12}}),{status:200});
+    const pack=makeDefaultJobPack('job-score','渠道销售','JD');
+    const result=await new DeepSeekProvider({apiKey:'test',fetcher}).scoreSearchFit(pack,{currentCompany:'示例科技',currentRole:'渠道销售负责人',experiences:[]});
+    expect(result).toMatchObject({score:75,policyVersion:MATCH_POLICY_VERSION,verificationQuestions:['确认团队规模','确认求职动机'],inputTokens:20,outputTokens:12});
+    expect(result.evidence).toContain('负责渠道销售团队');
+    expect(result.gaps).toContain('动机与薪资需面试确认');
+  });
+
+  it('retries once when dimension weights are inconsistent', async () => {
+    let attempts=0;
+    const valid=[
+      {id:'core_capability',earned:20,possible:25,confidence:'high',evidence:['核心能力命中'],gaps:['仍需核实']},
+      {id:'market_customer',earned:15,possible:20,confidence:'medium',evidence:['客户匹配'],gaps:['区域待核实']},
+      {id:'product_industry',earned:10,possible:15,confidence:'medium',evidence:['行业相邻'],gaps:['产品待核实']},
+      {id:'scope_level',earned:10,possible:15,confidence:'medium',evidence:['职级相近'],gaps:['团队待核实']},
+      {id:'outcome_evidence',earned:10,possible:15,confidence:'medium',evidence:['业绩证据'],gaps:['数字待核实']},
+      {id:'transferable_signals',earned:4,possible:5,confidence:'high',evidence:['能力可迁移'],gaps:['场景待核实']},
+      {id:'interview_only',earned:0,possible:5,confidence:'low',evidence:[],gaps:['只能面试确认']},
+    ];
+    const fetcher:typeof fetch=async()=>{
+      attempts+=1;
+      const dimensions=attempts===1?[{...valid[0],possible:24},...valid.slice(1)]:valid;
+      return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({dimensions,verificationQuestions:['只能面试确认']})}}]}),{status:200});
+    };
+    const pack=makeDefaultJobPack('job-retry-score','渠道销售','JD');
+    const result=await new DeepSeekProvider({apiKey:'test',fetcher}).scoreSearchFit(pack,{currentCompany:'示例科技',currentRole:'渠道销售',experiences:[]});
+    expect(attempts).toBe(2);
+    expect(result.score).toBe(69);
+  });
   it('generates a structured two-round Gulu plan capped at 50', async () => {
     const fetcher:typeof fetch=async()=>new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({rounds:[
       {kind:'company',limit:99,filters:{companies:['示例科技']}},

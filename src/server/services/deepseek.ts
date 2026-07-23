@@ -14,6 +14,11 @@ import {
 import { normalizeAiDraftRules } from "./job-pack.js";
 import type { SafeCandidate } from "./redaction.js";
 import { lintCampaign, searchFingerprint } from "./gulu-campaign.js";
+import {
+  MATCH_POLICY_VERSION,
+  MatchDimensionScoreSchema,
+  calculateSearchFit,
+} from "./match-policy.js";
 
 export type DeepSeekUsage = { inputTokens: number; outputTokens: number };
 export type DeepSeekResult<T> = {
@@ -634,35 +639,69 @@ export class DeepSeekProvider {
     candidate: SafeCandidate,
     signal?: AbortSignal,
   ): Promise<GuluSearchFit> {
-    const result = await this.generateJson(
-      "你是招聘检索质量评估助手。评估候选经历与岗位搜索目标的接近程度，输出0到100分search fit、1到4条已命中证据和信息缺口。该分数只优化搜索，不代表录用或淘汰。",
-      {
-        rules: {
-          constraints: pack.constraints,
-          industries: pack.industries,
-          roles: pack.roles,
-          evidence: pack.evidence,
-        },
-        candidate,
+    const instruction =
+      "你是招聘搜索质量评估助手。只能根据候选人简历中的明确证据，对七个固定维度分别评分；不得自行改变权重，不得用信息缺失推断不符合。输出 dimensions 和 verificationQuestions。固定权重：core_capability 25、market_customer 20、product_industry 15、scope_level 15、outcome_evidence 15、transferable_signals 5、interview_only 5。每个维度必须包含 id、earned、possible、confidence、evidence、gaps。总分由服务器计算，你输出的总分会被忽略。";
+    const payload = {
+      rules: {
+        constraints: pack.constraints,
+        industries: pack.industries,
+        roles: pack.roles,
+        evidence: pack.evidence,
+        idealCandidate: pack.ideal_candidate,
       },
-      signal,
-    );
-    const raw=result.data as Record<string,unknown>;
-    const evidenceInput=raw.evidence??raw.matched_evidence;
-    const gapsInput=raw.gaps??raw.information_gaps;
-    const normalized={score:Number(raw.score??raw.search_fit),evidence:(Array.isArray(evidenceInput)?evidenceInput.map(String):typeof evidenceInput==='string'?[evidenceInput]:[]).filter(Boolean).slice(0,4),gaps:(Array.isArray(gapsInput)?gapsInput.map(String):typeof gapsInput==='string'?[gapsInput]:[]).filter(Boolean).slice(0,6)};
-    if(!normalized.evidence.length)normalized.evidence=['未发现明确命中证据'];
-    const parsed = GuluSearchFitSchema.omit({
-      model: true,
-      inputTokens: true,
-      outputTokens: true,
-    }).parse(normalized);
-    return {
-      ...parsed,
-      model: result.model,
-      inputTokens: result.usage.inputTokens,
-      outputTokens: result.usage.outputTokens,
+      candidate,
     };
+    const normalize = (result: DeepSeekResult<unknown>): GuluSearchFit => {
+      const raw = result.data as Record<string, unknown>;
+      const dimensions = z
+        .array(MatchDimensionScoreSchema)
+        .length(7)
+        .parse(raw.dimensions);
+      const score = calculateSearchFit(dimensions);
+      const evidence = [
+        ...new Set(dimensions.flatMap((item) => item.evidence)),
+      ].slice(0, 4);
+      const gapPriority = [
+        ...dimensions.filter((item) => item.id === "interview_only"),
+        ...dimensions.filter((item) => item.id !== "interview_only"),
+      ];
+      const gaps = [...new Set(gapPriority.flatMap((item) => item.gaps))].slice(
+        0,
+        6,
+      );
+      const verificationQuestions = z
+        .array(z.string().trim().min(1))
+        .max(8)
+        .default([])
+        .parse(raw.verificationQuestions ?? raw.verification_questions);
+      return GuluSearchFitSchema.parse({
+        score,
+        evidence: evidence.length ? evidence : ["未发现明确命中证据"],
+        gaps,
+        dimensions,
+        verificationQuestions,
+        policyVersion: MATCH_POLICY_VERSION,
+        model: result.model,
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
+      });
+    };
+    const first = await this.generateJson(instruction, payload, signal, 2400);
+    try {
+      return normalize(first);
+    } catch {
+      const retry = await this.generateJson(
+        instruction,
+        {
+          ...payload,
+          retry_reason:
+            "上一轮维度结构或权重不一致。请严格输出七个固定维度，possible 总和必须为 100。",
+        },
+        signal,
+        2400,
+      );
+      return normalize(retry);
+    }
   }
 
   async decideGuluStrategy(input: {

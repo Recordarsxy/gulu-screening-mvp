@@ -32,6 +32,24 @@ describe('Gulu campaign service',()=>{
     task=service.completeStep(task.id,'company-seed',false);expect(task).toMatchObject({currentStepIndex:1,currentStepId:'role-cluster'});
     task=service.completeStep(task.id,'role-cluster',true);expect(task).toMatchObject({status:'completed',phase:'completed',completionReason:'search_exhausted'});
   });
+  it('persists dimension evidence, verification questions and policy version',()=>{
+    const {db,service}=setup();service.saveCampaign(draft);service.confirmCampaign('job-1','campaign-1',draft);const task=service.startCampaignTask('job-1','campaign-1');
+    service.startStep(task.id,'company-seed');db.prepare(`INSERT INTO candidates(id,job_id,dedupe_key,name,current_company,current_role,experiences_json) VALUES (?,?,?,?,?,?,?)`).run('candidate-structured','job-1','c-structured','候选人','示例公司','渠道销售','[]');
+    const dimensions=[
+      {id:'core_capability',earned:25,possible:25,confidence:'high',evidence:['渠道能力'],gaps:[]},
+      {id:'market_customer',earned:15,possible:20,confidence:'medium',evidence:['企业客户'],gaps:['区域待确认']},
+      {id:'product_industry',earned:10,possible:15,confidence:'medium',evidence:['相邻行业'],gaps:['产品待确认']},
+      {id:'scope_level',earned:10,possible:15,confidence:'medium',evidence:['负责人'],gaps:['团队待确认']},
+      {id:'outcome_evidence',earned:10,possible:15,confidence:'medium',evidence:['完成目标'],gaps:['增幅待确认']},
+      {id:'transferable_signals',earned:5,possible:5,confidence:'high',evidence:['能力可迁移'],gaps:[]},
+      {id:'interview_only',earned:0,possible:5,confidence:'low',evidence:[],gaps:['动机待面试']},
+    ];
+    service.recordSearchFit(task.id,'candidate-structured','company-seed',{score:75,evidence:['渠道能力'],gaps:['动机待面试'],dimensions,verificationQuestions:['确认求职动机'],policyVersion:'general-v1',model:'deepseek',inputTokens:2,outputTokens:3});
+    const row=db.prepare('SELECT dimensions_json,verification_questions_json,policy_version FROM gulu_search_fits WHERE task_id=? AND candidate_id=?').get(task.id,'candidate-structured') as Record<string,string>;
+    expect(JSON.parse(row.dimensions_json)).toHaveLength(7);
+    expect(JSON.parse(row.verification_questions_json)).toEqual(['确认求职动机']);
+    expect(row.policy_version).toBe('general-v1');
+  });
   it('appends only a sourced company expansion within campaign limits',()=>{
     const {service}=setup();service.saveCampaign(draft);service.confirmCampaign('job-1','campaign-1',draft);const task=service.startCampaignTask('job-1','campaign-1');
     const step=service.appendCompanyStep(task.id,{name:'火山引擎',source:'candidate_company',reason:'高匹配候选过往公司'});
