@@ -11,6 +11,23 @@ const response = (content: unknown) =>
     }),
     { status: 200 },
   );
+const fitDimensions = (earned: number[]) =>
+  [
+    ["core_capability", 25],
+    ["market_customer", 20],
+    ["product_industry", 15],
+    ["scope_level", 15],
+    ["outcome_evidence", 15],
+    ["transferable_signals", 5],
+    ["interview_only", 5],
+  ].map(([id, possible], index) => ({
+    id,
+    earned: earned[index],
+    possible,
+    confidence: earned[index] ? "medium" : "low",
+    evidence: earned[index] ? [`${id} evidence`] : [],
+    gaps: earned[index] === possible ? [] : [`${id} gap`],
+  }));
 const step = (
   type: string,
   title: string,
@@ -82,9 +99,9 @@ describe("DeepSeek adaptive campaign behavior", () => {
       apiKey: "test",
       fetcher: async () =>
         response({
-          score: 84,
-          evidence: ["海外B2B全流程销售"],
-          gaps: ["vibe coding待核实"],
+          score: 99,
+          dimensions: fitDimensions([25, 17, 12, 12, 12, 4, 2]),
+          verificationQuestions: ["vibe coding待核实"],
         }),
     });
     const pack = makeDefaultJobPack("job-1", "海外销售", "JD");
@@ -95,14 +112,14 @@ describe("DeepSeek adaptive campaign behavior", () => {
     });
     expect(fit).toMatchObject({
       score: 84,
-      evidence: ["海外B2B全流程销售"],
-      gaps: ["vibe coding待核实"],
+      evidence: ["core_capability evidence","market_customer evidence","product_industry evidence","scope_level evidence"],
+      verificationQuestions: ["vibe coding待核实"],
       model: "deepseek-test",
       inputTokens: 20,
       outputTokens: 10,
     });
   });
-  it("normalizes the field names returned by the live DeepSeek search-fit model",async()=>{const provider=new DeepSeekProvider({apiKey:"test",fetcher:async()=>response({search_fit:20,matched_evidence:[],information_gaps:["海外B2B经验","明确业绩"]})});const pack=makeDefaultJobPack("job-1","海外销售","JD");await expect(provider.scoreSearchFit(pack,{currentCompany:"示例公司",currentRole:"大客户经理",experiences:[]})).resolves.toMatchObject({score:20,evidence:["未发现明确命中证据"],gaps:["海外B2B经验","明确业绩"],model:"deepseek-test"});});
+  it("ignores alternate model total fields and calculates the structured search fit",async()=>{const provider=new DeepSeekProvider({apiKey:"test",fetcher:async()=>response({search_fit:99,dimensions:fitDimensions([10,5,0,5,0,0,0]),verification_questions:["海外B2B经验","明确业绩"]})});const pack=makeDefaultJobPack("job-1","海外销售","JD");await expect(provider.scoreSearchFit(pack,{currentCompany:"示例公司",currentRole:"大客户经理",experiences:[]})).resolves.toMatchObject({score:20,verificationQuestions:["海外B2B经验","明确业绩"],model:"deepseek-test"});});
   it("repairs empty or duplicate model steps with approved-rule fallbacks", async () => {
     const provider = new DeepSeekProvider({
       apiKey: "test",
