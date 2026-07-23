@@ -15,7 +15,7 @@ import {
 } from "../../shared/contracts.js";
 import { normalizeAiDraftRules } from "./job-pack.js";
 import type { SafeCandidate } from "./redaction.js";
-import { lintCampaign, searchFingerprint } from "./gulu-campaign.js";
+import { campaignQualityIssues,lintCampaign, searchFingerprint } from "./gulu-campaign.js";
 import {
   MATCH_POLICY_VERSION,
   MatchDimensionScoreSchema,
@@ -436,7 +436,7 @@ export class DeepSeekProvider {
     history: Array<Record<string, unknown>> = [],
   ): Promise<DeepSeekResult<GuluSearchCampaign>> {
     const result = await this.generateJson<Record<string, unknown>>(
-      "你是资深招聘寻访策略师。基于已批准岗位规则，为谷露生成3至8个逐步放宽且互不重复的搜索步骤。不得只生成固定公司轮和岗位轮。字段仅限keywords、companies、roles、cities、industries、functions；每步5至40人，总计不超过150人。职位和行业只能使用规则或用户输入，公司可以推导相邻人才公司。只输出summary、targetShortlist、steps JSON。",
+      "你是资深招聘寻访策略师。基于已批准岗位规则，为谷露生成4至8个互补且不重复的搜索假设。每个初始步骤只能使用一个筛选维度：单一目标公司方向、宽职位核心、市场行业或城市方向；不得一开始叠加多个维度。必须同时覆盖公司方向和职位方向。实际运行时结果大于40才增加第二个已批准维度，1至40立即读取，结果为0则换同义词或下一假设，已知空集合不得尝试更严格超集。字段仅限keywords、companies、roles、cities、industries、functions；每步5至40人，总计不超过150人。职位、行业、城市和职能只能使用规则或用户输入，公司可以推导相邻人才公司。每步必须说明objective、rationale、expectedSignals和sources。只输出summary、targetShortlist、steps JSON。",
       {
         rules: {
           constraints: pack.constraints,
@@ -491,16 +491,17 @@ export class DeepSeekProvider {
             ? "market_cluster"
             : "manual";
       const priorities: Record<string, Array<keyof typeof empty>> = {
-        seed_company: ["companies", "roles", "cities"],
-        role_cluster: ["roles", "industries", "cities"],
-        market_cluster: ["industries", "roles", "cities"],
-        manual: ["keywords", "roles", "cities"],
+        seed_company: ["companies"],
+        role_cluster: ["roles"],
+        market_cluster: ["industries"],
+        manual: ["keywords","cities","functions","roles"],
       };
-      const keep = new Set(priorities[inferredType]);
+      const primary=priorities[inferredType].find(field=>normalizedFilters[field].length>0)
+        ??(Object.keys(empty) as Array<keyof typeof empty>).find(field=>normalizedFilters[field].length>0);
       const filters = Object.fromEntries(
         Object.entries(normalizedFilters).map(([key, values]) => [
           key,
-          keep.has(key as keyof typeof empty) ? values : [],
+          key===primary ? values : [],
         ]),
       ) as typeof empty;
       const sources = Object.entries(filters).flatMap(([field, values]) =>
@@ -667,6 +668,7 @@ export class DeepSeekProvider {
       createdAt: now,
       updatedAt: now,
     });
+    if(campaignQualityIssues(data).length)throw new DeepSeekError("invalid_campaign");
     return { data, usage: result.usage, model: result.model };
   }
 

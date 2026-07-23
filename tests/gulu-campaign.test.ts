@@ -6,6 +6,7 @@ import {
   GuluSearchFitSchema,
 } from "../src/shared/contracts.js";
 import {
+  campaignQualityIssues,
   lintCampaign,
   searchFingerprint,
 } from "../src/server/services/gulu-campaign.js";
@@ -89,6 +90,15 @@ describe("adaptive Gulu search campaigns", () => {
         outputTokens: 5,
       }).score,
     ).toBe(82);
+  });
+  it("reports missing coverage and accepts four atomic complementary directions",()=>{
+    expect(campaignQualityIssues(campaign)).toContain("campaign_too_few_steps");
+    const complete={...campaign,steps:[
+      ...campaign.steps,
+      {...campaign.steps[0],id:"city",order:2,type:"manual" as const,filters:filters({cities:["深圳"]})},
+      {...campaign.steps[0],id:"industry",order:3,type:"market_cluster" as const,filters:filters({industries:["跨境物流"]})},
+    ]};
+    expect(campaignQualityIssues(complete)).toEqual([]);
   });
   it("rejects empty, duplicate and over-budget enabled steps", () => {
     expect(() =>

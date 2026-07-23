@@ -87,6 +87,9 @@ describe("DeepSeek adaptive campaign behavior", () => {
       status: "draft",
     });
     expect(result.data.steps).toHaveLength(4);
+    expect(result.data.steps.every(item=>Object.values(item.filters).filter(values=>values.length>0).length===1)).toBe(true);
+    expect(result.data.steps.some(item=>item.filters.companies.length>0)).toBe(true);
+    expect(result.data.steps.some(item=>item.filters.roles.length>0)).toBe(true);
     expect(
       new Set(result.data.steps.map((item) => JSON.stringify(item.filters)))
         .size,

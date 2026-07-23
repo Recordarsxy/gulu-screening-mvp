@@ -23,6 +23,20 @@ export function searchFingerprint(filters: GuluFilters): string {
     .join(";");
 }
 
+export function campaignQualityIssues(input:unknown):string[]{
+  const campaign=GuluSearchCampaignSchema.parse(input);
+  const enabled=campaign.steps.filter(step=>step.enabled);
+  const issues:string[]=[];
+  if(enabled.length<4)issues.push('campaign_too_few_steps');
+  if(enabled.length>8)issues.push('campaign_too_many_steps');
+  const dimensions=enabled.map(step=>keys.filter(key=>step.filters[key].some(value=>value.trim())));
+  if(dimensions.some(items=>items.length!==1))issues.push('campaign_steps_not_atomic');
+  if(!enabled.some(step=>step.filters.companies.some(value=>value.trim())))issues.push('campaign_missing_company_direction');
+  if(!enabled.some(step=>step.filters.roles.some(value=>value.trim())))issues.push('campaign_missing_role_direction');
+  if(new Set(dimensions.flat()).size<2)issues.push('campaign_insufficient_dimension_coverage');
+  return issues;
+}
+
 export function lintCampaign(input: unknown): GuluSearchCampaign {
   const campaign = GuluSearchCampaignSchema.parse(input);
   const enabled = campaign.steps.filter((step) => step.enabled);
