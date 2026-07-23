@@ -9,7 +9,7 @@ Turn an approved job profile into an adaptive, evidence-based search campaign. U
 
 ## Build the search space
 
-1. Extract broad role families before exact titles. Prefer `渠道销售` over `渠道销售总经理` unless the exact title is proven necessary.
+1. Extract broad role families before exact titles. Prefer `channel sales` over `channel sales general manager` unless the exact title is proven necessary.
 2. Separate independent axes: role/capability, market/customer, product/industry, company, location, and outcome evidence.
 3. Start with one strong axis. Add only one orthogonal axis at a time so every narrowing decision is explainable.
 4. Treat generated labels as hypotheses. Resolve them against the target system's real taxonomy before using structured filters.
