@@ -162,6 +162,7 @@ export function App() {
       setView(next);
       if (next === "results")
         setResults((await api.results(id, current?.id)).items);
+      setNotice(`已打开岗位：${data.job.title}`);
     } catch (e: any) {
       setNotice(e.message);
     } finally {

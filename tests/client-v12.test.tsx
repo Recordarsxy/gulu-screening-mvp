@@ -79,4 +79,9 @@ describe("v1.2 non-technical workflow UI", () => {
     expect(source).toContain("正在处理，请稍候");
     expect(source.match(/setBusy\(true\);/g)).toHaveLength(1);
   });
+
+  it("replaces the loading notice after a job finishes opening",async()=>{
+    const source=await readFile(new URL("../src/client/App.tsx",import.meta.url),"utf8");
+    expect(source).toContain("已打开岗位：${data.job.title}");
+  });
 });

@@ -217,6 +217,40 @@ export class DeepSeekProvider {
     };
   }
 
+  private async generateStrategyJson<T = unknown>(
+    instruction: string,
+    payload: unknown,
+    maxTokens: number,
+  ): Promise<DeepSeekResult<T>> {
+    const profile: DeepSeekRequestProfile = {
+      model: process.env.DEEPSEEK_STRATEGY_MODEL ?? "deepseek-v4-pro",
+      thinking: true,
+      reasoningEffort: "high",
+    };
+    try {
+      return await this.generateJson<T>(
+        instruction,
+        payload,
+        undefined,
+        maxTokens,
+        profile,
+      );
+    } catch (error) {
+      if (
+        !(error instanceof DeepSeekError) ||
+        error.code !== "response_truncated"
+      )
+        throw error;
+      return this.generateJson<T>(
+        `${instruction}\n上一次思考达到长度上限；请更简洁地推理并完整输出所需 JSON。`,
+        payload,
+        undefined,
+        Math.max(6000, Math.min(8000, maxTokens * 2)),
+        profile,
+      );
+    }
+  }
+
   async assessCandidate(
     pack: JobPack,
     candidate: SafeCandidate,
@@ -327,7 +361,7 @@ export class DeepSeekProvider {
     pack:JobPack,
     changeText:string,
   ):Promise<JobChangeAnalysis>{
-    const result=await this.generateJson<Record<string,unknown>>(
+    const result=await this.generateStrategyJson<Record<string,unknown>>(
       "你是招聘岗位规则变化分析助手。判断客户新反馈会影响哪些规则栏目。只输出 summary、impacts、questions JSON。impacts 的 section 只能是 constraints.hard、constraints.soft、companies.target、roles.exact、evidence.required、evidence.negative、questions；action 只能是 add、replace、remove、review。不得使用年龄、性别、婚育等受保护属性。",
       {
         current_rules:{
@@ -339,11 +373,30 @@ export class DeepSeekProvider {
         },
         change_text:changeText,
       },
-      undefined,
-      1800,
-      {model:process.env.DEEPSEEK_STRATEGY_MODEL??'deepseek-v4-pro',thinking:true,reasoningEffort:'high'},
+      6000,
     );
-    return JobChangeAnalysisSchema.parse({...result.data,model:result.model});
+    const impacts=Array.isArray(result.data.impacts)
+      ? result.data.impacts.map((raw)=>{
+          const impact=(raw&&typeof raw==="object"?raw:{}) as Record<string,unknown>;
+          const values=Array.isArray(impact.values)
+            ? impact.values.filter((value):value is string=>typeof value==="string"&&Boolean(value.trim()))
+            : [];
+          return {
+            ...impact,
+            values:values.length?values:[changeText],
+            reason:
+              typeof impact.reason==="string"&&impact.reason.trim()
+                ? impact.reason
+                : "客户新增要求",
+          };
+        })
+      : [];
+    return JobChangeAnalysisSchema.parse({
+      ...result.data,
+      impacts,
+      questions:Array.isArray(result.data.questions)?result.data.questions:[],
+      model:result.model,
+    });
   }
 
   async integrateJobChanges(
@@ -351,16 +404,24 @@ export class DeepSeekProvider {
     originalSource: string,
     changes: Array<string|{text:string;analysis:JobChangeAnalysis|null}>,
   ): Promise<JobPack> {
-    const result = await this.generateJson(
+    const result = await this.generateStrategyJson(
       "你是招聘岗位规则更新助手。将原始 JD、当前已批准规则和按时间排列的新变化整合为完整岗位包。新的明确要求覆盖冲突的旧要求，未被修改的规则必须保留。不得使用年龄、性别、婚育等受保护属性。只输出与 current_rules 结构一致的完整 JSON。",
       {
         original_source: originalSource,
-        current_rules: base,
+        current_rules: {
+          constraints: base.constraints,
+          industries: base.industries,
+          companies: base.companies,
+          roles: base.roles,
+          evidence: base.evidence,
+          search_plan: base.search_plan,
+          questions: base.questions,
+          summary: base.summary,
+          ideal_candidate: base.ideal_candidate,
+        },
         changes,
       },
-      undefined,
-      1800,
-      {model:process.env.DEEPSEEK_STRATEGY_MODEL??'deepseek-v4-pro',thinking:true,reasoningEffort:'high'},
+      6000,
     );
     const envelope = result.data as Record<string, unknown>;
     const raw = (envelope.job_pack ??
@@ -435,7 +496,7 @@ export class DeepSeekProvider {
     sourceNotes = "",
     history: Array<Record<string, unknown>> = [],
   ): Promise<DeepSeekResult<GuluSearchCampaign>> {
-    const result = await this.generateJson<Record<string, unknown>>(
+    const result = await this.generateStrategyJson<Record<string, unknown>>(
       "你是资深招聘寻访策略师。基于已批准岗位规则，为谷露生成4至8个互补且不重复的搜索假设。每个初始步骤只能使用一个筛选维度：单一目标公司方向、宽职位核心、市场行业或城市方向；不得一开始叠加多个维度。必须同时覆盖公司方向和职位方向。实际运行时结果大于40才增加第二个已批准维度，1至40立即读取，结果为0则换同义词或下一假设，已知空集合不得尝试更严格超集。字段仅限keywords、companies、roles、cities、industries、functions；每步5至40人，总计不超过150人。职位、行业、城市和职能只能使用规则或用户输入，公司可以推导相邻人才公司。每步必须说明objective、rationale、expectedSignals和sources。只输出summary、targetShortlist、steps JSON。",
       {
         rules: {
@@ -448,9 +509,7 @@ export class DeepSeekProvider {
         source_notes: sourceNotes,
         history,
       },
-      undefined,
-      4000,
-      {model:process.env.DEEPSEEK_STRATEGY_MODEL??'deepseek-v4-pro',thinking:true,reasoningEffort:'high'},
+      8000,
     );
     const rawSteps = Array.isArray(result.data.steps) ? result.data.steps : [];
     if (rawSteps.length < 3 || rawSteps.length > 8)
@@ -529,7 +588,7 @@ export class DeepSeekProvider {
         limit: Math.min(40, Math.max(5, Number(item.limit) || 20)),
         enabled: item.enabled !== false,
         filters,
-        sources: item.sources ?? sources,
+        sources,
       });
     };
     const generated = rawSteps.map((raw, index) =>

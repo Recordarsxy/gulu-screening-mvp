@@ -18,6 +18,31 @@ describe('DeepSeek provider', () => {
     expect(analysis.model).toBe('deepseek-v4-pro');
     expect(body).toMatchObject({model:'deepseek-v4-pro',thinking:{type:'enabled'},reasoning_effort:'high'});
   });
+  it('retries a truncated Pro job-change analysis with a larger reasoning budget',async()=>{
+    const budgets:number[]=[];let attempts=0;
+    const fetcher:typeof fetch=async(_url,init)=>{
+      const body=JSON.parse(String(init?.body??'{}'));budgets.push(body.max_tokens);attempts+=1;
+      if(attempts===1)return new Response(JSON.stringify({choices:[{finish_reason:'length',message:{content:'{"summary":"partial"'}}]}),{status:200});
+      return new Response(JSON.stringify({model:body.model,choices:[{finish_reason:'stop',message:{content:JSON.stringify({
+        summary:'More evidence required',impacts:[{section:'evidence.required',action:'add',values:['Quantified results'],reason:'New evidence requirement'}],questions:[],
+      })}}]}),{status:200});
+    };
+    const provider=new DeepSeekProvider({apiKey:'test',model:'deepseek-v4-flash',fetcher});
+    const result=await provider.analyzeJobChange(makeDefaultJobPack('job-change','Sales','JD'),'Require quantified results');
+    expect(result.summary).toBe('More evidence required');
+    expect(budgets).toEqual([6000,8000]);
+  });
+  it('keeps a useful change analysis when Pro omits optional impact details',async()=>{
+    const fetcher:typeof fetch=async()=>new Response(JSON.stringify({model:'deepseek-v4-pro',choices:[{message:{content:JSON.stringify({
+      summary:'Require measurable sales evidence',
+      impacts:[{section:'evidence.required',action:'add'}],
+      questions:[],
+    })}}]}),{status:200});
+    const provider=new DeepSeekProvider({apiKey:'test',fetcher});
+    const change='Prioritize quantified US-route customer development results';
+    const result=await provider.analyzeJobChange(makeDefaultJobPack('job-normalize','Sales','JD'),change);
+    expect(result.impacts[0]).toMatchObject({values:[change],reason:'客户新增要求'});
+  });
   it('calculates search fit from evidence-backed dimensions instead of trusting the model total', async () => {
     const dimensions = [
       {id:'core_capability',earned:22,possible:25,confidence:'high',evidence:['负责渠道销售团队'],gaps:['缺少完整团队规模']},
@@ -168,4 +193,7 @@ it('integrates job changes while preserving server-controlled identity and versi
   const merged=await (provider as any).integrateJobChanges(base,'原始 JD',['新增要求']);
   expect(merged).toMatchObject({job_id:'job-1',rule_version:1,approval:{status:'draft'},summary:'更新后'});
   expect(sent).toMatchObject({original_source:'原始 JD',changes:['新增要求']});
+  expect(sent.current_rules).not.toHaveProperty('job_id');
+  expect(sent.current_rules).not.toHaveProperty('rule_version');
+  expect(sent.current_rules).not.toHaveProperty('approval');
 });

@@ -55,9 +55,12 @@ describe("DeepSeek adaptive campaign behavior", () => {
           summary: "四方向验证海外销售人才池",
           targetShortlist: 8,
           steps: [
-            step("seed_company", "技术平台公司", {
-              companies: ["阿里云", "火山引擎"],
-            }),
+            {
+              ...step("seed_company", "技术平台公司", {
+                companies: ["阿里云", "火山引擎"],
+              }),
+              sources: "来自批准规则",
+            },
             step("role_cluster", "海外销售职位", {
               roles: ["海外销售经理", "国际销售经理"],
             }),
@@ -90,6 +93,7 @@ describe("DeepSeek adaptive campaign behavior", () => {
     expect(result.data.steps.every(item=>Object.values(item.filters).filter(values=>values.length>0).length===1)).toBe(true);
     expect(result.data.steps.some(item=>item.filters.companies.length>0)).toBe(true);
     expect(result.data.steps.some(item=>item.filters.roles.length>0)).toBe(true);
+    expect(result.data.steps.every(item=>Array.isArray(item.sources))).toBe(true);
     expect(
       new Set(result.data.steps.map((item) => JSON.stringify(item.filters)))
         .size,
