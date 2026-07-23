@@ -8,7 +8,7 @@ Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});
 const roots:Array<ReturnType<typeof createRoot>>=[];
 afterEach(()=>{roots.splice(0).forEach(root=>act(()=>root.unmount()));document.body.innerHTML=""});
 
-function renderRuleList(onCommit=(value:string[])=>{}){
+function renderRuleList(onCommit=(_value:string[])=>{}){
   const host=document.createElement("div");document.body.append(host);const root=createRoot(host);roots.push(root);
   function Harness(){const [value,setValue]=useState(["深圳"]);return <RuleList title="硬条件" value={value} onChange={next=>{setValue(next);onCommit(next)}}/>}
   act(()=>root.render(<Harness/>));
