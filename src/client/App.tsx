@@ -465,7 +465,14 @@ export function App() {
   const nav = (id: View, text: string) => (
     <button
       className={view === id ? "nav active" : "nav"}
-      onClick={() => setView(id)}
+      onClick={() => {
+        setView(id);
+        if (id === "results" && selected)
+          api
+            .results(selected, resultsRunId || undefined)
+            .then((data) => setResults(data.items))
+            .catch((error) => setNotice(error.message));
+      }}
     >
       {text}
     </button>

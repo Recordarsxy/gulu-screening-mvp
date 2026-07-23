@@ -55,5 +55,6 @@ describe("v1.3 adaptive campaign UI", () => {
     expect(app).toContain('待验证人才');
     expect(app).toContain('在谷露中查看');
     expect(app).toContain('rel="noopener noreferrer"');
+    expect(app).toContain('id === "results" && selected');
   });
 });
