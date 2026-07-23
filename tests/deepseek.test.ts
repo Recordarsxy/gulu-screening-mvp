@@ -4,6 +4,20 @@ import { makeDefaultJobPack } from '../src/server/services/job-pack.js';
 import { MATCH_POLICY_VERSION } from '../src/server/services/match-policy.js';
 
 describe('DeepSeek provider', () => {
+  it('uses Pro thinking-high only for low-frequency strategy work',async()=>{
+    let body:any={};
+    const fetcher:typeof fetch=async(_url,init)=>{
+      body=JSON.parse(String(init?.body??'{}'));
+      return new Response(JSON.stringify({model:body.model,choices:[{message:{content:JSON.stringify({
+        summary:'Role change',impacts:[{section:'roles.exact',action:'add',values:['Channel Sales'],reason:'New direction'}],questions:[],
+      })}}]}),{status:200});
+    };
+    const provider=new DeepSeekProvider({apiKey:'test',model:'deepseek-v4-flash',fetcher});
+    const pack=makeDefaultJobPack('job-strategy','Sales','JD');
+    const analysis=await provider.analyzeJobChange(pack,'Add channel sales');
+    expect(analysis.model).toBe('deepseek-v4-pro');
+    expect(body).toMatchObject({model:'deepseek-v4-pro',thinking:{type:'enabled'},reasoning_effort:'high'});
+  });
   it('calculates search fit from evidence-backed dimensions instead of trusting the model total', async () => {
     const dimensions = [
       {id:'core_capability',earned:22,possible:25,confidence:'high',evidence:['负责渠道销售团队'],gaps:['缺少完整团队规模']},

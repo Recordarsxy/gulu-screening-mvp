@@ -23,6 +23,11 @@ import {
 } from "./match-policy.js";
 
 export type DeepSeekUsage = { inputTokens: number; outputTokens: number };
+export type DeepSeekRequestProfile={
+  model?:string;
+  thinking?:boolean;
+  reasoningEffort?:'low'|'medium'|'high';
+};
 export type DeepSeekResult<T> = {
   data: T;
   usage: DeepSeekUsage;
@@ -145,6 +150,7 @@ export class DeepSeekProvider {
     payload: unknown,
     signal?: AbortSignal,
     maxTokens = 1800,
+    profile:DeepSeekRequestProfile={},
   ): Promise<DeepSeekResult<T>> {
     if (!this.apiKey) throw new DeepSeekError("missing_api_key");
     assertNoSensitiveText(payload);
@@ -155,7 +161,7 @@ export class DeepSeekProvider {
         authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
-        model: this.model,
+        model: profile.model??this.model,
         messages: [
           {
             role: "system",
@@ -164,6 +170,7 @@ export class DeepSeekProvider {
           { role: "user", content: JSON.stringify(payload) },
         ],
         response_format: { type: "json_object" },
+        ...(profile.thinking?{thinking:{type:'enabled'},reasoning_effort:profile.reasoningEffort??'high'}:{}),
         stream: false,
         max_tokens: maxTokens,
       }),
@@ -206,7 +213,7 @@ export class DeepSeekProvider {
         inputTokens: raw.usage?.prompt_tokens ?? 0,
         outputTokens: raw.usage?.completion_tokens ?? 0,
       },
-      model: raw.model ?? this.model,
+      model: raw.model ?? profile.model ?? this.model,
     };
   }
 
@@ -334,6 +341,7 @@ export class DeepSeekProvider {
       },
       undefined,
       1800,
+      {model:process.env.DEEPSEEK_STRATEGY_MODEL??'deepseek-v4-pro',thinking:true,reasoningEffort:'high'},
     );
     return JobChangeAnalysisSchema.parse({...result.data,model:result.model});
   }
@@ -350,6 +358,9 @@ export class DeepSeekProvider {
         current_rules: base,
         changes,
       },
+      undefined,
+      1800,
+      {model:process.env.DEEPSEEK_STRATEGY_MODEL??'deepseek-v4-pro',thinking:true,reasoningEffort:'high'},
     );
     const envelope = result.data as Record<string, unknown>;
     const raw = (envelope.job_pack ??
@@ -439,6 +450,7 @@ export class DeepSeekProvider {
       },
       undefined,
       4000,
+      {model:process.env.DEEPSEEK_STRATEGY_MODEL??'deepseek-v4-pro',thinking:true,reasoningEffort:'high'},
     );
     const rawSteps = Array.isArray(result.data.steps) ? result.data.steps : [];
     if (rawSteps.length < 3 || rawSteps.length > 8)
