@@ -215,4 +215,16 @@ export function migrate(db: DatabaseSync): void {
       db.prepare('INSERT INTO schema_migrations(version) VALUES (7)').run();db.exec('COMMIT');
     }catch(error){db.exec('ROLLBACK');throw error;}
   }
+  const version8=db.prepare('SELECT 1 ok FROM schema_migrations WHERE version=8').get();
+  if(!version8){
+    db.exec('BEGIN');
+    try{
+      const columns=db.prepare('PRAGMA table_info(gulu_search_fits)').all() as Array<{name:string}>;
+      const add=(name:string,sql:string)=>{if(!columns.some(column=>column.name===name))db.exec(sql)};
+      add('dimensions_json',"ALTER TABLE gulu_search_fits ADD COLUMN dimensions_json TEXT NOT NULL DEFAULT '[]'");
+      add('verification_questions_json',"ALTER TABLE gulu_search_fits ADD COLUMN verification_questions_json TEXT NOT NULL DEFAULT '[]'");
+      add('policy_version',"ALTER TABLE gulu_search_fits ADD COLUMN policy_version TEXT NOT NULL DEFAULT 'legacy'");
+      db.prepare('INSERT INTO schema_migrations(version) VALUES (8)').run();db.exec('COMMIT');
+    }catch(error){db.exec('ROLLBACK');throw error;}
+  }
 }

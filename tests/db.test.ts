@@ -56,4 +56,11 @@ describe('SQLite model', () => {
     const columns=(db.prepare('PRAGMA table_info(jobs)').all() as Array<{name:string}>).map(row=>row.name);
     expect(columns).toContain('archived_at');
   });
+
+  it('adds policy-versioned search fit details in schema version 8',()=>{
+    const db=openDatabase(':memory:');databases.push(db);migrate(db);
+    expect(db.prepare('SELECT 1 ok FROM schema_migrations WHERE version=8').get()).toEqual({ok:1});
+    const columns=(db.prepare('PRAGMA table_info(gulu_search_fits)').all() as Array<{name:string}>).map(row=>row.name);
+    expect(columns).toEqual(expect.arrayContaining(['dimensions_json','verification_questions_json','policy_version']));
+  });
 });

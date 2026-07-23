@@ -108,7 +108,20 @@ export const GuluStepProgressSchema=z.object({
   uniqueCount:z.number().int().nonnegative().default(0),duplicateRate:z.number().min(0).max(1).default(0),highFitCount:z.number().int().nonnegative().default(0),lastError:z.string().nullable().default(null),
 });
 export type GuluStepProgress=z.infer<typeof GuluStepProgressSchema>;
-export const GuluSearchFitSchema=z.object({score:z.number().int().min(0).max(100),evidence:z.array(z.string().min(1)).min(1).max(4),gaps:z.array(z.string().min(1)).max(6).default([]),model:z.string().min(1),inputTokens:z.number().int().nonnegative(),outputTokens:z.number().int().nonnegative()});
+export const GuluMatchDimensionSchema=z.object({
+  id:z.string().min(1),earned:z.number().int().nonnegative(),possible:z.number().int().positive(),
+  confidence:z.enum(['low','medium','high']),evidence:z.array(z.string().min(1)).max(4),gaps:z.array(z.string().min(1)).max(4),
+}).superRefine((value,ctx)=>{
+  if(value.earned>value.possible)ctx.addIssue({code:'custom',message:'dimension_score_exceeds_weight'});
+  if(value.earned>0&&!value.evidence.length)ctx.addIssue({code:'custom',message:'positive_score_requires_evidence'});
+  if(value.earned<value.possible&&!value.gaps.length)ctx.addIssue({code:'custom',message:'incomplete_dimension_requires_gap'});
+});
+export type GuluMatchDimension=z.infer<typeof GuluMatchDimensionSchema>;
+export const GuluSearchFitSchema=z.object({
+  score:z.number().int().min(0).max(100),evidence:z.array(z.string().min(1)).min(1).max(4),gaps:z.array(z.string().min(1)).max(6).default([]),
+  dimensions:z.array(GuluMatchDimensionSchema).default([]),verificationQuestions:z.array(z.string().min(1)).max(8).default([]),
+  policyVersion:z.string().min(1).default('legacy'),model:z.string().min(1),inputTokens:z.number().int().nonnegative(),outputTokens:z.number().int().nonnegative(),
+});
 export type GuluSearchFit=z.infer<typeof GuluSearchFitSchema>;
 
 export const JobChangeNoteSchema = z.object({
