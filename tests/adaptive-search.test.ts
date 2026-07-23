@@ -38,7 +38,15 @@ describe('adaptive AND probe planner',()=>{
   });
   it('allows reading only for a bounded non-empty result set',()=>{
     const current=filters({companies:['阿里云'],roles:['海外销售经理']});
-    expect(planAdaptiveProbe({campaign,seedStepId:'company',currentFilters:current,resultCount:42,triedFingerprints:[]})).toMatchObject({action:'read',filters:current});
+    expect(planAdaptiveProbe({campaign,seedStepId:'company',currentFilters:current,resultCount:40,triedFingerprints:[]})).toMatchObject({action:'read',filters:current});
+  });
+  it('refines a result set above forty before reading profiles',()=>{
+    const current=filters({companies:['阿里云']});
+    expect(planAdaptiveProbe({campaign,seedStepId:'company',currentFilters:current,resultCount:41,triedFingerprints:[]})).toMatchObject({
+      action:'refine',
+      rationale:'result_set_too_large',
+      filters:filters({companies:['阿里云'],roles:['海外销售']}),
+    });
   });
   it('backs out of an empty combination and tries a different refinement',()=>{
     const current=filters({companies:['阿里云'],roles:['海外销售经理']});
@@ -46,6 +54,28 @@ describe('adaptive AND probe planner',()=>{
     expect(decision.action).toBe('refine');
     expect(decision.filters.companies).toEqual(['阿里云']);
     expect(searchFingerprint(decision.filters)).not.toBe(searchFingerprint(current));
+  });
+  it('prunes every stricter superset of a known empty filter set',()=>{
+    const compactCampaign={
+      ...campaign,
+      steps:[
+        step('company-a',0,'companies','Company A'),
+        step('sales-role',1,'roles','Sales'),
+        step('shenzhen-city',2,'cities','Shenzhen'),
+      ],
+    };
+    const seed=filters({companies:['Company A']});
+    const companyRole=filters({companies:['Company A'],roles:['Sales']});
+    const companyCity=filters({companies:['Company A'],cities:['Shenzhen']});
+    const decision=planAdaptiveProbe({
+      campaign:compactCampaign,
+      seedStepId:'company-a',
+      currentFilters:companyCity,
+      resultCount:0,
+      triedFingerprints:[searchFingerprint(seed),searchFingerprint(companyRole)],
+      emptyFilters:[companyRole,companyCity],
+    });
+    expect(decision.action).toBe('next_step');
   });
   it('moves to the next seed when every bounded combination was tried',()=>{
     const seed=filters({companies:['阿里云']});

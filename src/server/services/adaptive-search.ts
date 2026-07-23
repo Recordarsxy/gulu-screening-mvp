@@ -19,7 +19,7 @@ export function atomicSearchFilters(filters:GuluFilters):GuluFilters{
 }
 
 export type AdaptiveProbeDecision={action:'read'|'refine'|'next_step';filters:GuluFilters;rationale:'bounded_result_set'|'result_set_too_large'|'empty_combination'|'combinations_exhausted'};
-export type AdaptiveProbeInput={campaign:GuluSearchCampaign;seedStepId:string;currentFilters:GuluFilters;resultCount:number;triedFingerprints:string[]};
+export type AdaptiveProbeInput={campaign:GuluSearchCampaign;seedStepId:string;currentFilters:GuluFilters;resultCount:number;triedFingerprints:string[];emptyFilters?:GuluFilters[]};
 
 function enumerateCombinations(campaign:GuluSearchCampaign,seedStepId:string):GuluFilters[]{
   const seed=campaign.steps.find(step=>step.id===seedStepId);
@@ -37,12 +37,15 @@ function enumerateCombinations(campaign:GuluSearchCampaign,seedStepId:string):Gu
 
 export function planAdaptiveProbe(input:AdaptiveProbeInput):AdaptiveProbeDecision{
   if(!Number.isInteger(input.resultCount)||input.resultCount<0)throw new Error('invalid_probe_count');
-  if(input.resultCount>=1&&input.resultCount<=100)return{action:'read',filters:input.currentFilters,rationale:'bounded_result_set'};
+  if(input.resultCount>=1&&input.resultCount<=40)return{action:'read',filters:input.currentFilters,rationale:'bounded_result_set'};
   const tried=new Set([...input.triedFingerprints,searchFingerprint(input.currentFilters)]);
-  const available=enumerateCombinations(input.campaign,input.seedStepId).filter(filters=>!tried.has(searchFingerprint(filters)));
-  const next=input.resultCount>100
+  const knownEmpty=input.emptyFilters??[];
+  const available=enumerateCombinations(input.campaign,input.seedStepId).filter(filters=>
+    !tried.has(searchFingerprint(filters))&&!knownEmpty.some(empty=>includesFilters(filters,empty))
+  );
+  const next=input.resultCount>40
     ? available.find(filters=>dimensions(filters)>dimensions(input.currentFilters)&&includesFilters(filters,input.currentFilters))
     : available.find(filters=>dimensions(filters)===dimensions(input.currentFilters)&&!includesFilters(filters,input.currentFilters))??available[0];
-  if(next)return{action:'refine',filters:next,rationale:input.resultCount>100?'result_set_too_large':'empty_combination'};
+  if(next)return{action:'refine',filters:next,rationale:input.resultCount>40?'result_set_too_large':'empty_combination'};
   return{action:'next_step',filters:input.currentFilters,rationale:'combinations_exhausted'};
 }

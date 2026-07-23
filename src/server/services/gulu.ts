@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import { GuluCandidateSnapshotSchema, GuluConnectorTaskSchema, GuluSearchCampaignSchema, GuluSearchFitSchema, GuluSearchPlanSchema, GuluSearchStepSchema, GuluStepProgressSchema, type GuluConnectorTask, type GuluSearchCampaign, type GuluSearchPlan, type GuluSearchStep, type GuluStepProgress } from '../../shared/contracts.js';
+import { GuluCandidateSnapshotSchema, GuluConnectorTaskSchema, GuluSearchCampaignSchema, GuluSearchFitSchema, GuluSearchPlanSchema, GuluSearchStepSchema, GuluStepProgressSchema, type GuluConnectorTask, type GuluFilters, type GuluSearchCampaign, type GuluSearchPlan, type GuluSearchStep, type GuluStepProgress } from '../../shared/contracts.js';
 import { getCurrentVersion } from './job-pack.js';
 import {lintCampaign,searchFingerprint} from './gulu-campaign.js';
 import {atomicSearchFilters,planAdaptiveProbe} from './adaptive-search.js';
@@ -134,8 +134,11 @@ export class GuluService {
   private recordAdaptiveProbe(id:string,stepId:string,resultCount:number,unavailableFilter?:{field:string;value:string}){
     const task=this.getTask(id);if(!task.campaignId)throw new Error('campaign_not_found');if(task.currentStepId!==stepId)throw new Error('invalid_step');if(!Number.isInteger(resultCount)||resultCount<0)throw new Error('invalid_probe_count');
     const current=this.getCurrentCampaignStep(id);if(!current)throw new Error('invalid_step');const strategy=this.getTaskStrategy(id);
-    const triedFingerprints=strategy.decisions.filter((item:any)=>item.stepId===stepId&&item.action==='probe'&&item.patch?.testedFilters).map((item:any)=>searchFingerprint(item.patch.testedFilters));
-    const decision=planAdaptiveProbe({campaign:strategy.campaign,seedStepId:stepId,currentFilters:current.filters,resultCount,triedFingerprints});
+    const stepProbes=strategy.decisions.filter((item:any)=>item.stepId===stepId&&item.action==='probe'&&item.patch?.testedFilters);
+    const triedFingerprints=stepProbes.map((item:any)=>searchFingerprint(item.patch.testedFilters));
+    const emptyFilters=stepProbes.filter((item:any)=>item.metrics?.resultCount===0).map((item:any)=>item.patch.testedFilters as GuluFilters);
+    if(resultCount===0)emptyFilters.push(current.filters);
+    const decision=planAdaptiveProbe({campaign:strategy.campaign,seedStepId:stepId,currentFilters:current.filters,resultCount,triedFingerprints,emptyFilters});
     this.recordStrategyDecision(id,stepId,'probe',unavailableFilter?{resultCount:null,unavailableFilter}:{resultCount},unavailableFilter?`filter_unavailable:${decision.rationale}`:decision.rationale,{testedFilters:current.filters,nextFilters:decision.filters,probeAction:decision.action});
     if(decision.action==='refine'){
       const step=GuluSearchStepSchema.parse({...current,filters:decision.filters});
