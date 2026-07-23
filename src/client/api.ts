@@ -234,6 +234,25 @@ export type ConnectorStatus = {
   extensionVersion?: string;
   lastError?: string;
 };
+export type GuluTaxonomySync = {
+  id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  counts: { cities: number; industries: number; functions: number };
+  total: number;
+  error: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+};
+export type GuluTaxonomyValue = {
+  field: "cities" | "industries" | "functions";
+  requestedValue: string;
+  canonicalValue: string;
+  status: "valid" | "missing";
+  source: string;
+  parentValue: string | null;
+  depth: number | null;
+};
 
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -311,6 +330,14 @@ export const api = {
       body: JSON.stringify({ limit }),
     }),
   connectorStatus: () => json<ConnectorStatus>("/api/connectors/gulu/status"),
+  guluTaxonomy: () =>
+    json<{ items: GuluTaxonomyValue[]; sync: GuluTaxonomySync | null }>(
+      "/api/connectors/gulu/taxonomy?summary=1",
+    ),
+  syncGuluTaxonomy: () =>
+    json<GuluTaxonomySync>("/api/connectors/gulu/taxonomy/sync", {
+      method: "POST",
+    }),
   createPairing: () =>
     json<{ code: string; expiresAt: string }>("/api/connectors/gulu/pairing", {
       method: "POST",

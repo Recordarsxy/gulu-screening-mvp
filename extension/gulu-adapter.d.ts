@@ -9,6 +9,7 @@ export function inspectListState(options?:{doc?:Document;loc?:{href?:string}}):{
 export function resetFilters(options?:{doc?:Document}):Promise<{cleared:string[]}>;
 export function applyFilters(filters:Record<string,string[]>,options?:{submit?:boolean;reset?:boolean;doc?:Document;loc?:{href?:string}}):Promise<unknown>;
 export function applyFilterValue(field:'keywords'|'companies'|'roles'|'cities'|'industries'|'functions',value:string,options?:{doc?:Document}):Promise<{accepted:true;field:string;value:string;committed:true}>;
+export function scanTaxonomyField(field:'cities'|'industries'|'functions',options?:{doc?:Document}):Promise<Array<{label:string;parent:string|null;depth:number}>>;
 export function submitSearch(options?:{doc?:Document;loc?:{href?:string}}):{submitted:true;autoSubmitted:boolean};
 export function readList(options?:{doc?:Document;page?:number;baseUrl?:string}):Array<Record<string,unknown>>;
 export function readDetail(seed:Record<string,unknown>,options?:{doc?:Document;sourceRound?:string;page?:number}):Record<string,unknown>;

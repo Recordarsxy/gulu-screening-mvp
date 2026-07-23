@@ -253,4 +253,45 @@ export function migrate(db: DatabaseSync): void {
       db.prepare('INSERT INTO schema_migrations(version) VALUES (10)').run();db.exec('COMMIT');
     }catch(error){db.exec('ROLLBACK');throw error;}
   }
+  const version11=db.prepare('SELECT 1 ok FROM schema_migrations WHERE version=11').get();
+  if(!version11){
+    db.exec('BEGIN');
+    try{
+      const columns=db.prepare('PRAGMA table_info(gulu_taxonomy_values)').all() as Array<{name:string}>;
+      if(!columns.some(column=>column.name==='parent_value'))db.exec('ALTER TABLE gulu_taxonomy_values ADD COLUMN parent_value TEXT');
+      if(!columns.some(column=>column.name==='depth'))db.exec('ALTER TABLE gulu_taxonomy_values ADD COLUMN depth INTEGER');
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS gulu_taxonomy_syncs (
+          id TEXT PRIMARY KEY,
+          status TEXT NOT NULL CHECK(status IN ('queued','running','completed','failed')),
+          counts_json TEXT NOT NULL DEFAULT '{"cities":0,"industries":0,"functions":0}',
+          error TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          started_at TEXT,
+          completed_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_gulu_taxonomy_sync_status ON gulu_taxonomy_syncs(status,created_at);
+      `);
+      db.prepare('INSERT INTO schema_migrations(version) VALUES (11)').run();db.exec('COMMIT');
+    }catch(error){db.exec('ROLLBACK');throw error;}
+  }
+  const version12=db.prepare('SELECT 1 ok FROM schema_migrations WHERE version=12').get();
+  if(!version12){
+    db.exec('BEGIN');
+    try{
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS gulu_taxonomy_sync_values (
+          sync_id TEXT NOT NULL REFERENCES gulu_taxonomy_syncs(id) ON DELETE CASCADE,
+          field TEXT NOT NULL,
+          requested_value TEXT NOT NULL,
+          canonical_value TEXT NOT NULL,
+          parent_value TEXT,
+          depth INTEGER NOT NULL,
+          PRIMARY KEY(sync_id,field,requested_value)
+        );
+        CREATE INDEX IF NOT EXISTS idx_gulu_taxonomy_sync_values ON gulu_taxonomy_sync_values(sync_id,field);
+      `);
+      db.prepare('INSERT INTO schema_migrations(version) VALUES (12)').run();db.exec('COMMIT');
+    }catch(error){db.exec('ROLLBACK');throw error;}
+  }
 }

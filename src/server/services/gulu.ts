@@ -12,6 +12,10 @@ const constantEqual = (left:string,right:string) => {
 };
 
 type TaskRow = Record<string,string|number|null>;
+type TaxonomyField='cities'|'industries'|'functions';
+type TaxonomyNode={label:string;parent:string|null;depth:number};
+type TaxonomyCounts=Record<TaxonomyField,number>;
+type TaxonomySyncRow={id:string;status:'queued'|'running'|'completed'|'failed';counts_json:string;error:string|null;created_at:string;started_at:string|null;completed_at:string|null};
 export class GuluService {
   constructor(private readonly db: DatabaseSync) {}
 
@@ -93,12 +97,133 @@ export class GuluService {
 
   listTaxonomy(){
     return this.db.prepare(`SELECT field,requested_value requestedValue,canonical_value canonicalValue,status,
-      source,hit_count hitCount,first_seen_at firstSeenAt,last_seen_at lastSeenAt
+      source,parent_value parentValue,depth,hit_count hitCount,first_seen_at firstSeenAt,last_seen_at lastSeenAt
       FROM gulu_taxonomy_values ORDER BY field,requested_value`).all();
+  }
+
+  private taxonomySync(row:TaxonomySyncRow|null|undefined){
+    if(!row)return null;
+    const counts=JSON.parse(row.counts_json) as TaxonomyCounts;
+    return{id:row.id,status:row.status,counts,total:counts.cities+counts.industries+counts.functions,error:row.error,createdAt:row.created_at,startedAt:row.started_at,completedAt:row.completed_at};
+  }
+
+  getTaxonomySync(){
+    return this.taxonomySync(this.db.prepare('SELECT * FROM gulu_taxonomy_syncs ORDER BY created_at DESC,rowid DESC LIMIT 1').get() as TaxonomySyncRow|undefined);
+  }
+
+  startTaxonomySync(){
+    this.db.prepare(`UPDATE gulu_taxonomy_syncs SET status='failed',error='taxonomy_sync_stale',completed_at=CURRENT_TIMESTAMP
+      WHERE status='running' AND started_at<datetime('now','-5 minutes')`).run();
+    const active=this.db.prepare("SELECT * FROM gulu_taxonomy_syncs WHERE status IN ('queued','running') ORDER BY created_at LIMIT 1").get() as TaxonomySyncRow|undefined;
+    if(active)return this.taxonomySync(active)!;
+    const id=randomUUID();
+    this.db.prepare('INSERT INTO gulu_taxonomy_syncs(id,status) VALUES (?,?)').run(id,'queued');
+    return this.getTaxonomySync()!;
+  }
+
+  claimNextTaxonomySync(){
+    this.db.prepare(`UPDATE gulu_taxonomy_syncs SET status='failed',error='taxonomy_sync_stale',completed_at=CURRENT_TIMESTAMP
+      WHERE status='running' AND started_at<datetime('now','-5 minutes')`).run();
+    const row=this.db.prepare("SELECT * FROM gulu_taxonomy_syncs WHERE status='queued' ORDER BY created_at LIMIT 1").get() as TaxonomySyncRow|undefined;
+    if(!row)return null;
+    const claimed=this.db.prepare("UPDATE gulu_taxonomy_syncs SET status='running',started_at=CURRENT_TIMESTAMP,error=NULL WHERE id=? AND status='queued'").run(row.id);
+    if(claimed.changes!==1)return null;
+    return this.taxonomySync(this.db.prepare('SELECT * FROM gulu_taxonomy_syncs WHERE id=?').get(row.id) as TaxonomySyncRow);
+  }
+
+  recordTaxonomyField(syncId:string,field:string,input:unknown){
+    if(!['cities','industries','functions'].includes(field))throw new Error('invalid_taxonomy_field');
+    const sync=this.db.prepare('SELECT * FROM gulu_taxonomy_syncs WHERE id=?').get(syncId) as TaxonomySyncRow|undefined;
+    if(!sync||sync.status!=='running')throw new Error('taxonomy_sync_not_running');
+    if(!Array.isArray(input)||input.length>5000)throw new Error('invalid_taxonomy_nodes');
+    const nodes=[...new Map(input.map((item:any)=>{
+      const label=String(item?.label??'').replace(/\s+/g,' ').trim().slice(0,300);
+      const parent=item?.parent==null?null:String(item.parent).replace(/\s+/g,' ').trim().slice(0,300);
+      const depth=Math.max(1,Math.min(12,Number(item?.depth)||1));
+      if(!label)throw new Error('invalid_taxonomy_node');
+      return[label,{label,parent,depth} satisfies TaxonomyNode];
+    })).values()];
+    if(!nodes.length)throw new Error('empty_taxonomy_field');
+    const counts=JSON.parse(sync.counts_json) as TaxonomyCounts;
+    counts[field as TaxonomyField]=nodes.length;
+    this.db.exec('BEGIN');
+    try{
+      this.db.prepare('DELETE FROM gulu_taxonomy_sync_values WHERE sync_id=? AND field=?').run(syncId,field);
+      const insert=this.db.prepare(`INSERT INTO gulu_taxonomy_sync_values(sync_id,field,requested_value,canonical_value,parent_value,depth)
+        VALUES (?,?,?,?,?,?)`);
+      for(const node of nodes)insert.run(syncId,field,node.label,node.label,node.parent,node.depth);
+      this.db.prepare('UPDATE gulu_taxonomy_syncs SET counts_json=? WHERE id=?').run(JSON.stringify(counts),syncId);
+      this.db.exec('COMMIT');
+    }catch(error){this.db.exec('ROLLBACK');throw error}
+    return{field,count:nodes.length};
+  }
+
+  completeTaxonomySync(syncId:string){
+    const sync=this.db.prepare('SELECT * FROM gulu_taxonomy_syncs WHERE id=?').get(syncId) as TaxonomySyncRow|undefined;
+    if(!sync||sync.status!=='running')throw new Error('taxonomy_sync_not_running');
+    const counts=JSON.parse(sync.counts_json) as TaxonomyCounts;
+    if(Object.values(counts).some(count=>count<1))throw new Error('taxonomy_sync_incomplete');
+    const staged=this.db.prepare('SELECT field,COUNT(*) count FROM gulu_taxonomy_sync_values WHERE sync_id=? GROUP BY field').all(syncId) as Array<{field:TaxonomyField;count:number}>;
+    if((['cities','industries','functions'] as const).some(field=>staged.find(item=>item.field===field)?.count!==counts[field]))throw new Error('taxonomy_sync_incomplete');
+    this.db.exec('BEGIN');
+    try{
+      this.db.prepare("DELETE FROM gulu_taxonomy_values WHERE source='full_scan'").run();
+      this.db.prepare(`INSERT INTO gulu_taxonomy_values(field,requested_value,canonical_value,status,source,parent_value,depth)
+        SELECT field,requested_value,canonical_value,'valid','full_scan',parent_value,depth
+        FROM gulu_taxonomy_sync_values WHERE sync_id=?
+        ON CONFLICT(field,requested_value) DO UPDATE SET canonical_value=excluded.canonical_value,status='valid',
+          source='full_scan',parent_value=excluded.parent_value,depth=excluded.depth,
+          hit_count=gulu_taxonomy_values.hit_count+1,last_seen_at=CURRENT_TIMESTAMP`).run(syncId);
+      this.db.prepare("UPDATE gulu_taxonomy_syncs SET status='completed',completed_at=CURRENT_TIMESTAMP,error=NULL WHERE id=?").run(syncId);
+      this.db.prepare('DELETE FROM gulu_taxonomy_sync_values WHERE sync_id=?').run(syncId);
+      this.db.exec('COMMIT');
+    }catch(error){this.db.exec('ROLLBACK');throw error}
+    return this.taxonomySync(this.db.prepare('SELECT * FROM gulu_taxonomy_syncs WHERE id=?').get(syncId) as TaxonomySyncRow)!;
+  }
+
+  failTaxonomySync(syncId:string,error:string){
+    this.db.prepare("UPDATE gulu_taxonomy_syncs SET status='failed',error=?,completed_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('queued','running')").run(error.slice(0,300),syncId);
+    this.db.prepare('DELETE FROM gulu_taxonomy_sync_values WHERE sync_id=?').run(syncId);
+    return this.taxonomySync(this.db.prepare('SELECT * FROM gulu_taxonomy_syncs WHERE id=?').get(syncId) as TaxonomySyncRow);
   }
 
   applyTaxonomyDictionary(input:unknown):GuluSearchCampaign {
     const campaign=GuluSearchCampaignSchema.parse(input);
+    const scanned=this.db.prepare(`SELECT field,requested_value requestedValue,canonical_value canonicalValue
+      FROM gulu_taxonomy_values WHERE status='valid' AND source='full_scan'`).all() as Array<{field:TaxonomyField;requestedValue:string;canonicalValue:string}>;
+    if(scanned.length){
+      const steps=campaign.steps.map(step=>{
+        const filters=structuredClone(step.filters);
+        let sources=structuredClone(step.sources);
+        for(const field of ['cities','industries','functions'] as const){
+          const dictionary=scanned.filter(item=>item.field===field);
+          if(!dictionary.length)continue;
+          const aliases=(label:string)=>{
+            const parts=[label,...label.split(/\s*(?:\/|-|（|）|\(|\))\s*/u),...(label.match(/\p{Script=Han}+/gu)??[])];
+            return new Set(parts.map(part=>part.replace(/\s+/g,' ').trim().toLocaleLowerCase()).filter(Boolean));
+          };
+          const resolved:string[]=[];const rejected:string[]=[];const mapped=new Map<string,string>();
+          for(const value of filters[field]){
+            const exact=dictionary.find(item=>item.requestedValue===value||item.canonicalValue===value);
+            const normalized=value.replace(/\s+/g,' ').trim().toLocaleLowerCase();
+            const aliasMatches=dictionary.filter(item=>aliases(item.canonicalValue).has(normalized));
+            const match=exact??(aliasMatches.length===1?aliasMatches[0]:null);
+            if(match){resolved.push(match.canonicalValue);mapped.set(value,match.canonicalValue)}else rejected.push(value);
+          }
+          filters[field]=[...new Set(resolved)];
+          if(!resolved.length)filters.keywords=[...new Set([...filters.keywords,...rejected])];
+          sources=sources.flatMap(source=>{
+            if(source.field!==field)return[source];
+            const canonical=mapped.get(source.value);
+            if(canonical)return[{...source,value:canonical,reason:`${source.reason}；已映射为谷露真实标签`}];
+            if(!rejected.includes(source.value))return[source];
+            return resolved.length?[]:[{...source,field:'keywords' as const,reason:'谷露完整标签词典未命中，改用关键词搜索'}];
+          });
+        }
+        return GuluSearchStepSchema.parse({...step,filters,sources});
+      });
+      return GuluSearchCampaignSchema.parse({...campaign,steps});
+    }
     const missing=this.db.prepare("SELECT field,requested_value requestedValue FROM gulu_taxonomy_values WHERE status='missing'").all() as Array<{field:'cities'|'industries'|'functions';requestedValue:string}>;
     if(!missing.length)return campaign;
     const steps=campaign.steps.map(step=>{

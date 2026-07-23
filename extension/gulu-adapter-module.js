@@ -12,6 +12,7 @@ export const inspectListState=adapter.inspectListState;
 export const resetFilters=adapter.resetFilters;
 export const applyFilters=adapter.applyFilters;
 export const applyFilterValue=adapter.applyFilterValue;
+export const scanTaxonomyField=adapter.scanTaxonomyField;
 export const submitSearch=adapter.submitSearch;
 export const readList=adapter.readList;
 export const readDetail=adapter.readDetail;

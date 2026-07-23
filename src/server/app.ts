@@ -80,7 +80,16 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
     if (!gulu.authenticate(token)) return res.status(401).json({error:'connector_unauthorized'}); next();
   };
   app.post('/api/connector/gulu/heartbeat',connectorAuth,(req,res)=>{gulu.heartbeat(String(req.body?.status??'online'),req.body?.error?String(req.body.error):null,String(req.body?.extensionVersion??''));res.json({ok:true});});
-  app.get('/api/connectors/gulu/taxonomy',(_req,res)=>res.json({items:gulu.listTaxonomy()}));
+  app.get('/api/connectors/gulu/taxonomy',(req,res)=>res.json({items:req.query.summary==='1'?[]:gulu.listTaxonomy(),sync:gulu.getTaxonomySync()}));
+  app.post('/api/connectors/gulu/taxonomy/sync',(_req,res,next)=>{try{res.status(201).json(gulu.startTaxonomySync())}catch(error){next(error)}});
+  app.get('/api/connector/gulu/taxonomy/next',connectorAuth,(_req,res)=>res.json({sync:gulu.claimNextTaxonomySync()}));
+  app.post('/api/connector/gulu/taxonomy/:syncId/events',connectorAuth,(req,res,next)=>{try{
+    const type=String(req.body?.type??'');
+    if(type==='field')return res.json(gulu.recordTaxonomyField(String(req.params.syncId),String(req.body?.field??''),req.body?.nodes));
+    if(type==='completed')return res.json(gulu.completeTaxonomySync(String(req.params.syncId)));
+    if(type==='failed')return res.json(gulu.failTaxonomySync(String(req.params.syncId),String(req.body?.error??'taxonomy_scan_failed')));
+    return res.status(400).json({error:'invalid_taxonomy_event'});
+  }catch(error){next(error)}});
   app.get('/api/connector/gulu/tasks/next',connectorAuth,(_req,res)=>{
     const row=db.prepare("SELECT id,job_id FROM gulu_tasks WHERE status IN ('queued','running') ORDER BY created_at LIMIT 1").get() as {id:string;job_id:string}|undefined;
     if (!row) return res.json({task:null}); const task=gulu.getTask(row.id);if(task.campaignId){const strategy=gulu.getTaskStrategy(row.id);return res.json({...strategy,step:gulu.getCurrentCampaignStep(row.id),pacingMs:{min:800,max:1500}})}const plan=gulu.getTaskPlan(row.id); res.json({task,plan,pacingMs:{min:800,max:1500}});
@@ -349,7 +358,8 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
 
   app.use((error: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     if(['job_pack_generation_timeout','job_pack_generation_failed'].includes(error.message))return res.status(503).json({error:error.message});
-    const known = ['job_not_found','run_not_found','rule_version_not_found','document_has_no_extractable_text','unsafe_source_path','protected_attribute_rule','confirmation_required','candidate_not_in_job','pairing_code_invalid','gulu_plan_not_confirmed','task_aborted','liepin_job_pack_not_found'];
+    if(error.message==='taxonomy_sync_not_running')return res.status(409).json({error:error.message});
+    const known = ['job_not_found','run_not_found','rule_version_not_found','document_has_no_extractable_text','unsafe_source_path','protected_attribute_rule','confirmation_required','candidate_not_in_job','pairing_code_invalid','gulu_plan_not_confirmed','task_aborted','liepin_job_pack_not_found','invalid_taxonomy_field','invalid_taxonomy_nodes','invalid_taxonomy_node','empty_taxonomy_field','taxonomy_sync_incomplete'];
     res.status(known.includes(error.message) ? 400 : 500).json({ error: error.message || 'internal_error' });
   });
   return app;

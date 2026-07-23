@@ -45,10 +45,10 @@ async function api(path, init = {}) {
   return data;
 }
 
-async function send(tabId, operation, args = {}) {
+async function send(tabId, operation, args = {}, timeoutMs = 5000) {
   const response = await Promise.race([
     chrome.tabs.sendMessage(tabId, { operation, args }),
-    delay(5000).then(() => { throw new Error(`adapter_timeout:${operation}`); }),
+    delay(timeoutMs).then(() => { throw new Error(`adapter_timeout:${operation}`); }),
   ]);
   if (!response?.ok) throw new Error(response?.error ?? 'adapter_unavailable');
   return response.result;
@@ -288,6 +288,35 @@ async function runCampaignTask({ task, campaign, steps, step }) {
   resumeSoon();
 }
 
+async function runTaxonomySync(sync) {
+  const tab=await ensureTab();
+  await chrome.tabs.update(tab.id,{url:GULU});
+  let navigated=false;
+  for(let attempt=0;attempt<30;attempt+=1){
+    const pending=await chrome.tabs.get(tab.id);
+    if(String(pending.url??'')===GULU){navigated=true;break}
+    await delay(100);
+  }
+  if(!navigated)throw new Error('taxonomy_navigation_failed');
+  await chrome.tabs.reload(tab.id);
+  await delay(500);
+  const state=await waitReady(tab.id,'taxonomy');
+  if(state.state==='login_required'||state.state==='captcha')throw new Error(state.state);
+  if(state.state!=='list')throw new Error('unsupported_page');
+  const current=await chrome.tabs.get(tab.id);
+  const currentUrl=new URL(String(current.url??''));
+  const hashQuery=currentUrl.hash.includes('?')?currentUrl.hash.slice(currentUrl.hash.indexOf('?')+1):'';
+  if(currentUrl.origin!=='http://121.43.105.7'||!currentUrl.hash.startsWith('#candidate/list?')||new URLSearchParams(hashQuery).get('savedSearchId')!=='94096')throw new Error('taxonomy_scope_not_all_talent');
+  const forbidden=await send(tab.id,'inspectForbiddenFilters');
+  if(!forbidden.safe)throw new Error(`forbidden_search_scope:${forbidden.filters.join(',')}`);
+  for(const field of ['cities','industries','functions']){
+    const nodes=await send(tab.id,'scanTaxonomyField',{field},30000);
+    if(!Array.isArray(nodes)||!nodes.length)throw new Error(`taxonomy_tree_empty:${field}`);
+    await api(`/api/connector/gulu/taxonomy/${sync.id}/events`,{method:'POST',body:JSON.stringify({type:'field',field,nodes})});
+  }
+  await api(`/api/connector/gulu/taxonomy/${sync.id}/events`,{method:'POST',body:JSON.stringify({type:'completed'})});
+}
+
 async function runOnce() {
   if (active) {
     await api('/api/connector/gulu/heartbeat', {
@@ -299,7 +328,15 @@ async function runOnce() {
   if (await reloadIfUpdated()) return;
   active = true;
   let currentTask = null;
+  let currentSync = null;
   try {
+    const taxonomy=await api('/api/connector/gulu/taxonomy/next');
+    if(taxonomy.sync){
+      currentSync=taxonomy.sync;
+      await runTaxonomySync(currentSync);
+      await api('/api/connector/gulu/heartbeat',{method:'POST',body:JSON.stringify({status:'online',extensionVersion:chrome.runtime.getManifest().version})});
+      return;
+    }
     const next = await api('/api/connector/gulu/tasks/next');
     await api('/api/connector/gulu/heartbeat', { method: 'POST', body: JSON.stringify({ status: 'online', extensionVersion: chrome.runtime.getManifest().version }) });
     if (!next.task) return;
@@ -429,6 +466,7 @@ async function runOnce() {
     }
   } catch (error) {
     const message = String(error?.message ?? error);
+    if(currentSync)await api(`/api/connector/gulu/taxonomy/${currentSync.id}/events`,{method:'POST',body:JSON.stringify({type:'failed',error:message})}).catch(()=>{});
     if (currentTask && !['task_not_running', 'task_aborted'].includes(message)) {
       const immediateAttention = [
         'filter_control_changed',

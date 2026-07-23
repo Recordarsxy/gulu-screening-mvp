@@ -4,6 +4,8 @@ import {
   type ConnectorStatus,
   type GuluPlan,
   type GuluSearchCampaign,
+  type GuluTaxonomySync,
+  type GuluTaxonomyValue,
   type GuluTask,
   type JobChangeNote,
   type JobPack,
@@ -62,6 +64,8 @@ export function App() {
   const endBusy=()=>{setBusyAction(null);setBusy(false)};
   const [demo, setDemo] = useState<RunRecord | null>(null),
     [connector, setConnector] = useState<ConnectorStatus | null>(null),
+    [taxonomySync, setTaxonomySync] = useState<GuluTaxonomySync | null>(null),
+    [taxonomyValues, setTaxonomyValues] = useState<GuluTaxonomyValue[]>([]),
     [pairing, setPairing] = useState<{
       code: string;
       expiresAt: string;
@@ -94,6 +98,26 @@ export function App() {
       .connectorStatus()
       .then(setConnector)
       .catch(() => setConnector(null));
+  const refreshTaxonomy = () =>
+    api
+      .guluTaxonomy()
+      .then((data) => {
+        setTaxonomySync(data.sync);
+        setTaxonomyValues(data.items);
+      })
+      .catch(() => {});
+  const startTaxonomySync = async () => {
+    beginBusy("sync-taxonomy", "正在通知谷露扩展只读扫描城市、行业和职能标签…");
+    try {
+      const sync = await api.syncGuluTaxonomy();
+      setTaxonomySync(sync);
+      setNotice("词典初始化已开始；页面会自动显示三个标签树的真实数量。");
+    } catch (error: any) {
+      setNotice(`词典初始化失败：${error.message}`);
+    } finally {
+      endBusy();
+    }
+  };
   const refreshLiepinPacks = () =>
     api
       .listLiepinJobPacks()
@@ -108,8 +132,12 @@ export function App() {
   useEffect(() => {
     refreshJobs();
     refreshConnector();
+    refreshTaxonomy();
     refreshLiepinPacks();
-    const timer = setInterval(refreshConnector, 10000);
+    const timer = setInterval(() => {
+      refreshConnector();
+      refreshTaxonomy();
+    }, 3000);
     return () => clearInterval(timer);
   }, []);
   useEffect(() => {
@@ -1140,6 +1168,64 @@ export function App() {
                   生成一次性配对码
                 </button>
               )}
+            </div>
+            <div className="panel taxonomy-panel">
+              <div className="panel-title">
+                <span className="step dark">词</span>
+                <div>
+                  <h2>谷露标签词典</h2>
+                  <p>只读扫描“所有人才”搜索页，不打开候选人、不提交筛选</p>
+                </div>
+              </div>
+              <div className="taxonomy-metrics">
+                {([
+                  ["cities", "城市"],
+                  ["industries", "行业"],
+                  ["functions", "职能"],
+                ] as const).map(([field, label]) => (
+                  <div className="metric" key={field}>
+                    <small>{label}</small>
+                    <strong>
+                      {taxonomySync?.counts[field] ??
+                        taxonomyValues.filter(
+                          (item) =>
+                            item.field === field &&
+                            item.status === "valid" &&
+                            item.source === "full_scan",
+                        ).length}
+                    </strong>
+                  </div>
+                ))}
+              </div>
+              <p className="muted">
+                状态：
+                {taxonomySync?.status === "queued"
+                  ? "等待扩展"
+                  : taxonomySync?.status === "running"
+                    ? "正在扫描"
+                    : taxonomySync?.status === "completed"
+                      ? `已完成，共 ${taxonomySync.total} 个真实标签`
+                      : taxonomySync?.status === "failed"
+                        ? `失败：${taxonomySync.error || "未知错误"}`
+                        : "尚未初始化"}
+              </p>
+              <button
+                className="primary"
+                onClick={startTaxonomySync}
+                disabled={
+                  busy ||
+                  !connector?.extensionOnline ||
+                  taxonomySync?.status === "queued" ||
+                  taxonomySync?.status === "running"
+                }
+              >
+                {taxonomySync?.status === "completed"
+                  ? "重新扫描标签词典"
+                  : taxonomySync?.status === "queued" ||
+                      taxonomySync?.status === "running"
+                    ? "正在建立词典…"
+                    : "初始化谷露标签词典"}
+              </button>
             </div>
             <div className="panel">
               <h2>DeepSeek 连接</h2>
