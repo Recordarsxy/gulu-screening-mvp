@@ -115,6 +115,20 @@ export class GuluService {
   recordFilterUnavailable(id:string,stepId:string,field:string,value:string){
     if(!['cities','industries','functions'].includes(field)||!value.trim())throw new Error('invalid_filter_unavailable');
     const current=this.getCurrentCampaignStep(id);if(!current||!current.filters[field as 'cities'|'industries'|'functions'].includes(value.trim()))throw new Error('invalid_filter_unavailable');
+    const normalizedValue=value.trim();
+    const fallbackFilters={...current.filters,[field]:current.filters[field as 'cities'|'industries'|'functions'].filter(item=>item!==normalizedValue),keywords:[normalizedValue]};
+    const strategy=this.getTaskStrategy(id);
+    const fallbackFingerprint=searchFingerprint(fallbackFilters);
+    const alreadyTried=strategy.decisions.some((item:any)=>
+      [item.patch?.testedFilters,item.patch?.nextFilters].some(filters=>filters&&searchFingerprint(filters)===fallbackFingerprint)
+    );
+    if(!alreadyTried){
+      const step=GuluSearchStepSchema.parse({...current,filters:fallbackFilters});
+      this.recordStrategyDecision(id,stepId,'probe',{resultCount:null,executionMode:'keyword',unavailableFilter:{field,value:normalizedValue}},'taxonomy_keyword_fallback',{testedFilters:current.filters,nextFilters:fallbackFilters,probeAction:'refine'});
+      this.db.prepare("UPDATE gulu_task_steps SET step_json=?,status='pending',page=1,candidate_cursor=0,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE task_id=? AND step_id=?").run(JSON.stringify(step),id,stepId);
+      this.db.prepare("UPDATE gulu_tasks SET status='running',phase='search',page=1,candidate_cursor=0,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(id);
+      return{task:this.getTask(id),action:'refine' as const,step,resultCount:0,rationale:'taxonomy_keyword_fallback'};
+    }
     return this.recordAdaptiveProbe(id,stepId,0,{field,value:value.trim()});
   }
   private recordAdaptiveProbe(id:string,stepId:string,resultCount:number,unavailableFilter?:{field:string;value:string}){
