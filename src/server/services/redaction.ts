@@ -11,7 +11,7 @@ const sensitivePatterns: RegExp[] = [
   /(?:\+?86[\s-]?)?1[3-9](?:[\s-]?\d){9}\b/g,
   /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,
   /\b\d{17}[0-9Xx]\b/g,
-  /(?:微信|wechat|wx)[：:\s_-]*[a-zA-Z0-9_-]+/gi,
+  /(?:微信|wechat|webchat|wx)[：:\s_-]*[a-zA-Z0-9_-]+/gi,
   /(?:住址|地址)[：:]?[^，。;；\n]+/g,
 ];
 
@@ -53,7 +53,7 @@ export function assertNoSensitiveText(payload: unknown): void {
     /(?:\+?86[\s-]?)?1[3-9](?:[\s-]?\d){9}\b/,
     /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i,
     /\b\d{17}[0-9Xx]\b/,
-    /(?:微信|wechat|wx)[：:\s_-]*[a-zA-Z0-9_-]+/i,
+    /(?:微信|wechat|webchat|wx)[：:\s_-]*[a-zA-Z0-9_-]+/i,
     /(?:住址|地址)[：:]?[^，。；\n]+/,
   ];
   if (forbidden.some((pattern) => pattern.test(serialized))) throw new Error('sensitive_data_detected');

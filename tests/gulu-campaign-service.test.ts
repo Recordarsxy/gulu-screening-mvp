@@ -57,4 +57,7 @@ describe('Gulu campaign service',()=>{
     expect(service.getTaskStrategy(task.id).decisions.at(-1)).toMatchObject({action:'probe',metrics:{resultCount:null,unavailableFilter:{field:'industries',value:'3D打印'}},rationale:expect.stringContaining('filter_unavailable'),patch:{testedFilters:taxonomyDraft.steps[0].filters}});
     expect(()=>service.recordFilterUnavailable(task.id,'company-seed','industries','不在当前步骤')).toThrow('invalid_filter_unavailable');
   });
+  it('redacts sensitive spillover before persisting a candidate snapshot',()=>{
+    const {db,service}=setup();service.saveCampaign(draft);service.confirmCampaign('job-1','campaign-1',draft);const task=service.startCampaignTask('job-1','campaign-1');service.recordCandidate(task.id,'candidate-sensitive',{guluId:'G-SAFE',name:'候选人',detailUrl:'http://121.43.105.7/crm#candidate/detail?id=G-SAFE',company:'甲公司',role:'海外销售',experiences:[{company:'甲公司',role:'海外销售',period:'2020-至今',summary:'电话 15900849376，WebChat abc_123，地址：上海市浦东新区。'}],education:[],tags:[],sourceRound:'campaign',sourceStepId:'company-seed',page:1,capturedAt:new Date().toISOString()});const stored=String((db.prepare('SELECT snapshot_json FROM gulu_snapshots WHERE task_id=?').get(task.id) as {snapshot_json:string}).snapshot_json);for(const value of ['15900849376','abc_123','上海市浦东新区'])expect(stored).not.toContain(value);
+  });
 });

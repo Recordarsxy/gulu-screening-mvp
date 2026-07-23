@@ -2,6 +2,7 @@ const SEMANTIC_OPERATIONS=Object.freeze(['inspectState','inspectCandidateScope',
 const allowed=Object.freeze(['guluId','name','detailUrl','company','role','city','industry','function','salary','experiences','education','tags','sourceRound','sourceStepId','page','capturedAt']);
 function sanitizeSnapshot(input){const output={};for(const key of allowed)if(input[key]!==undefined)output[key]=input[key];output.experiences=Array.isArray(output.experiences)?output.experiences:[];output.education=Array.isArray(output.education)?output.education:[];output.tags=Array.isArray(output.tags)?output.tags:[];for(const key of ['company','role','city','industry','function','salary'])output[key]=String(output[key]??'').slice(0,500);return output;}
 const clean=(value)=>String(value??'').replace(/\s+/g,' ').trim();
+const redactSensitive=(value)=>clean(value).replace(/(?:\+?86[\s-]?)?1[3-9](?:[\s-]?\d){9}\b/g,'[已脱敏]').replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,'[已脱敏]').replace(/(?:微信|wechat|webchat|wx)[：:\s_-]*[a-zA-Z0-9_-]+/gi,'[已脱敏]').replace(/(?:住址|地址)[：:]?[^,，。;；\n]+/g,'[已脱敏]');
 const confirmedAllTalent=new WeakMap();
 const hasExplicitEmpty=(doc)=>/暂无(?:数据|记录|人才|候选人?|搜索结果)?|无数据|没有(?:找到)?(?:符合[^。；]{0,30})?(?:数据|人才|候选人?|搜索结果)|未找到(?:符合[^。；]{0,30})?(?:人才|候选人?|结果)|搜索结果为空|共\s*0\s*条|0\s*(?:位|个)\s*(?:人才|候选人?)/.test(clean(doc.body?.innerText??doc.body?.textContent));
 const visible=(element)=>Boolean(element&&element.getClientRects().length&&getComputedStyle(element).display!=='none'&&getComputedStyle(element).visibility!=='hidden');
@@ -48,7 +49,7 @@ function readDetail(seed,{doc=globalThis.document,sourceRound='role',page=1}={})
   company:clean(node.querySelector('.company-name')?.textContent),
   role:clean(node.querySelector('.detail-view-title')?.textContent),
   period:clean(node.querySelector('.fn-item-key')?.getAttribute('data-original-title')||node.querySelector('.detail-view-time')?.textContent),
-  summary:clean(node.querySelector('.detail-view-description')?.textContent||node.textContent).slice(0,3000),
+  summary:redactSensitive(node.querySelector('.detail-view-description')?.textContent||node.textContent).slice(0,3000),
  }));
  const latest=experiences[0];
  return sanitizeSnapshot({...seed,company:latest?.company||seed.company||'',role:textOf(doc,'.vcard-span .detail-view-title')||latest?.role||seed.role||'',city:textOf(doc,'.detail-view-citys')||seed.city||'',industry:textOf(doc,'.detail-view-industrys')||seed.industry||'',function:textOf(doc,'.detail-view-functions')||seed.function||'',salary:textOf(doc,'.detail-view-annualSalary')||seed.salary||'',experiences,education:education?[clean(education.textContent).slice(0,2000)]:[],tags:[],sourceRound,page,capturedAt:new Date().toISOString()});

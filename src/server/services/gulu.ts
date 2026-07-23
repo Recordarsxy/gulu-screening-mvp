@@ -4,6 +4,7 @@ import { GuluCandidateSnapshotSchema, GuluConnectorTaskSchema, GuluSearchCampaig
 import { getCurrentVersion } from './job-pack.js';
 import {lintCampaign,searchFingerprint} from './gulu-campaign.js';
 import {atomicSearchFilters,planAdaptiveProbe} from './adaptive-search.js';
+import {sanitizeTextForCloud} from './redaction.js';
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 const constantEqual = (left:string,right:string) => {
@@ -176,7 +177,7 @@ export class GuluService {
   }
 
   recordCandidate(id:string,eventId:string,input:unknown):{task:GuluConnectorTask;duplicateEvent:boolean} & GuluConnectorTask {
-    const snapshot=GuluCandidateSnapshotSchema.parse(input); this.getTask(id);
+    const raw=GuluCandidateSnapshotSchema.parse(input);const safeText=(value:string)=>sanitizeTextForCloud(value);const snapshot=GuluCandidateSnapshotSchema.parse({...raw,company:safeText(raw.company),role:safeText(raw.role),city:safeText(raw.city),industry:safeText(raw.industry),function:safeText(raw.function),salary:safeText(raw.salary),experiences:raw.experiences.map(item=>({company:safeText(item.company),role:safeText(item.role),period:safeText(item.period),summary:safeText(item.summary)})),education:raw.education.map(safeText),tags:raw.tags.map(safeText)}); this.getTask(id);
     const event=this.db.prepare('INSERT OR IGNORE INTO gulu_task_events(event_id,task_id,event_type,payload_json) VALUES (?,?,?,?)').run(eventId,id,'candidate',JSON.stringify(snapshot));
     if (Number(event.changes)===0) { const task=this.getTask(id); return {...task,task,duplicateEvent:true}; }
     const dedupeKey=snapshot.guluId||snapshot.detailUrl;const contentHash=sha256(JSON.stringify({company:snapshot.company,role:snapshot.role,city:snapshot.city,industry:snapshot.industry,function:snapshot.function,salary:snapshot.salary,experiences:snapshot.experiences,education:snapshot.education,tags:snapshot.tags}));
