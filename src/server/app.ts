@@ -1,10 +1,11 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import express from 'express';
 import multer from 'multer';
-import { approveVersion, createDraft, getCurrentVersion, makeDefaultJobPack, restoreDraft, reviseDraft } from './services/job-pack.js';
+import { approveVersion, createDraft, getCurrentVersion, makeDefaultJobPack, normalizeAiDraftRules, restoreDraft, reviseDraft } from './services/job-pack.js';
 import { generateHumanGuide, parseSource } from './services/documents.js';
 import { ScreeningEngine } from './services/screening.js';
 import { demoCompanyRound, demoRoleRound } from './demo/candidates.js';
@@ -16,14 +17,16 @@ import { JobChangeService } from './services/job-changes.js';
 import { archiveJob, restoreJob } from './services/job-archive.js';
 import { resetJobSection, type JobResetSection } from './services/job-reset.js';
 import { safeGuluCandidateUrl } from '../shared/gulu-link.js';
+import { LiepinJobPackStore, toGuluJobPack } from './services/liepin-job-packs.js';
 
-type AppDeps = { db: DatabaseSync; dataRoot: string; deepSeek?: DeepSeekProvider; jobPackTimeoutMs?:number };
+type AppDeps = { db: DatabaseSync; dataRoot: string; deepSeek?: DeepSeekProvider; jobPackTimeoutMs?:number; liepinJobsRoot?:string };
 
-export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobPackTimeoutMs=Number(process.env.JOB_PACK_TIMEOUT_MS||60_000) }: AppDeps) {
+export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobPackTimeoutMs=Number(process.env.JOB_PACK_TIMEOUT_MS||60_000),liepinJobsRoot=process.env.LIEPIN_JOBS_DIR||join(homedir(),'Liepin-Codex','jobs') }: AppDeps) {
   const app = express(); const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
   const engine = new ScreeningEngine(db, deepSeek);
   const gulu = new GuluService(db);
   const jobChanges = new JobChangeService(db);
+  const liepinJobPacks = new LiepinJobPackStore(liepinJobsRoot);
   const taskControllers=new Map<string,AbortController>();
   const candidateRequests=new Map<string,Promise<unknown>>();
   const generateInitialPack=async(base:ReturnType<typeof makeDefaultJobPack>,safeSource:string)=>{
@@ -41,6 +44,32 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
   app.disable('x-powered-by'); app.use(express.json({ limit: '2mb' }));
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, host: '127.0.0.1', mode: 'local-only', version: '1.3.0' }));
+
+  app.get('/api/integrations/liepin/job-packs',async(_req,res,next)=>{try{
+    res.json(await liepinJobPacks.list());
+  }catch(error){next(error)}});
+  app.get('/api/integrations/liepin/job-packs/:packageId',async(req,res,next)=>{try{
+    res.json(await liepinJobPacks.get(String(req.params.packageId)));
+  }catch(error){
+    if(error instanceof Error&&error.message==='liepin_job_pack_not_found')return res.status(404).json({error:error.message});
+    next(error);
+  }});
+  app.post('/api/integrations/liepin/job-packs/:packageId/import',async(req,res,next)=>{try{
+    const preview=await liepinJobPacks.get(String(req.params.packageId));
+    const sourceHash=createHash('sha256').update(`liepin-import-v2:${preview.id}\0${preview.importSource}`).digest('hex');
+    const existing=db.prepare('SELECT id FROM jobs WHERE source_hash=?').get(sourceHash) as {id:string}|undefined;
+    if(existing){
+      db.prepare('UPDATE jobs SET archived_at=NULL WHERE id=?').run(existing.id);
+      return res.json({jobId:existing.id,pack:getCurrentVersion(db,existing.id),reused:true});
+    }
+    const jobId=randomUUID();
+    const pack=createDraft(db,{jobId,title:preview.title,sourceText:preview.importSource,pack:normalizeAiDraftRules(toGuluJobPack(preview,jobId))});
+    db.prepare('UPDATE jobs SET source_hash=? WHERE id=?').run(sourceHash,jobId);
+    res.status(201).json({jobId,pack,reused:false});
+  }catch(error){
+    if(error instanceof Error&&error.message==='liepin_job_pack_not_found')return res.status(404).json({error:error.message});
+    next(error);
+  }});
 
   app.post('/api/connectors/gulu/pairing', (_req,res,next) => { try { res.status(201).json(gulu.createPairing()); } catch(error){ next(error); } });
   app.get('/api/connectors/gulu/status', (_req,res) => res.json(gulu.getStatus()));
@@ -320,7 +349,7 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
 
   app.use((error: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     if(['job_pack_generation_timeout','job_pack_generation_failed'].includes(error.message))return res.status(503).json({error:error.message});
-    const known = ['job_not_found','run_not_found','rule_version_not_found','document_has_no_extractable_text','unsafe_source_path','protected_attribute_rule','confirmation_required','candidate_not_in_job','pairing_code_invalid','gulu_plan_not_confirmed','task_aborted'];
+    const known = ['job_not_found','run_not_found','rule_version_not_found','document_has_no_extractable_text','unsafe_source_path','protected_attribute_rule','confirmation_required','candidate_not_in_job','pairing_code_invalid','gulu_plan_not_confirmed','task_aborted','liepin_job_pack_not_found'];
     res.status(known.includes(error.message) ? 400 : 500).json({ error: error.message || 'internal_error' });
   });
   return app;

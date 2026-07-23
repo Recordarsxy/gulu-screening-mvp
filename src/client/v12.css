@@ -606,3 +606,91 @@ button:focus-visible,
   margin: 6px 0 0;
   color: #536f7d;
 }
+
+.liepin-pack-panel {
+  grid-column: 1 / -1;
+}
+.liepin-pack-heading {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+}
+.liepin-pack-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(380px, 0.8fr);
+  gap: 18px;
+}
+.liepin-pack-list {
+  display: grid;
+  gap: 10px;
+}
+.liepin-pack-card {
+  border: 1px solid #dce6e9;
+  border-radius: 11px;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  background: #fbfcfc;
+}
+.liepin-pack-card.selected {
+  border-color: #df623d;
+  background: #fffaf8;
+}
+.liepin-pack-card h3,
+.liepin-pack-card p {
+  margin: 0 0 7px;
+}
+.liepin-pack-card p,
+.liepin-pack-card small {
+  color: #718995;
+}
+.liepin-pack-actions {
+  display: flex;
+  gap: 8px;
+}
+.liepin-pack-preview {
+  border: 1px solid #cbdade;
+  border-radius: 12px;
+  padding: 18px;
+  background: #f6f9fa;
+  min-width: 0;
+}
+.liepin-pack-preview details {
+  border-top: 1px solid #dce6e9;
+  padding: 12px 0;
+}
+.liepin-pack-preview summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: #23495b;
+}
+.liepin-pack-preview pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 280px;
+  overflow: auto;
+  color: #486472;
+  font: 12px/1.7 "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+.liepin-file-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0;
+}
+.liepin-file-chips span {
+  border-radius: 999px;
+  padding: 4px 9px;
+  color: #2f5b6e;
+  background: #e5eef1;
+  font-size: 11px;
+}
+@media (max-width: 1200px) {
+  .liepin-pack-grid {
+    grid-template-columns: 1fr;
+  }
+  .liepin-pack-card {
+    grid-template-columns: 1fr;
+  }
+}

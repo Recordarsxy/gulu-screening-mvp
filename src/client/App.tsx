@@ -8,6 +8,8 @@ import {
   type JobChangeNote,
   type JobPack,
   type JobSummary,
+  type LiepinJobPackPreview,
+  type LiepinJobPackSummary,
   type ResultItem,
   type ResetSection,
   type RunRecord,
@@ -49,6 +51,10 @@ export function App() {
       "寻找具备大型制造企业客户拓展经验，能够负责关键客户增长的销售经理。",
     ),
     [file, setFile] = useState<File | null>(null);
+  const [liepinPacks, setLiepinPacks] = useState<LiepinJobPackSummary[]>([]);
+  const [liepinPreview, setLiepinPreview] =
+    useState<LiepinJobPackPreview | null>(null);
+  const [liepinConfigured, setLiepinConfigured] = useState(true);
   const [busyAction,setBusyAction]=useState<string|null>(null);
   const beginBusy=(action="general",label="正在处理，请稍候…")=>{
     setBusyAction(action);setNotice(label);setBusy(true);
@@ -88,9 +94,21 @@ export function App() {
       .connectorStatus()
       .then(setConnector)
       .catch(() => setConnector(null));
+  const refreshLiepinPacks = () =>
+    api
+      .listLiepinJobPacks()
+      .then((data) => {
+        setLiepinConfigured(data.configured);
+        setLiepinPacks(data.items);
+      })
+      .catch(() => {
+        setLiepinConfigured(false);
+        setLiepinPacks([]);
+      });
   useEffect(() => {
     refreshJobs();
     refreshConnector();
+    refreshLiepinPacks();
     const timer = setInterval(refreshConnector, 10000);
     return () => clearInterval(timer);
   }, []);
@@ -164,6 +182,39 @@ export function App() {
       if (next === "results")
         setResults((await api.results(id, current?.id)).items);
       setNotice(`已打开岗位：${data.job.title}`);
+      return true;
+    } catch (e: any) {
+      setNotice(e.message);
+      return false;
+    } finally {
+      endBusy();
+    }
+  };
+  const previewLiepinPack = async (id: string) => {
+    beginBusy(`liepin-preview-${id}`, "正在读取 Liepin-Codex 岗位包…");
+    try {
+      setLiepinPreview(await api.getLiepinJobPack(id));
+      setNotice("岗位包已打开，可核对后导入。");
+    } catch (e: any) {
+      setNotice(e.message);
+    } finally {
+      endBusy();
+    }
+  };
+  const importLiepinPack = async (id: string) => {
+    beginBusy(
+      `liepin-import-${id}`,
+      "正在把 Liepin-Codex 岗位包转换为谷露规则，请稍候…",
+    );
+    try {
+      const imported = await api.importLiepinJobPack(id);
+      await refreshJobs();
+      if (!(await openJob(imported.jobId))) return;
+      setNotice(
+        imported.reused
+          ? "该岗位包已经导入，已直接打开原岗位。"
+          : "岗位包已导入，并已打开规则审核。",
+      );
     } catch (e: any) {
       setNotice(e.message);
     } finally {
@@ -623,6 +674,131 @@ export function App() {
                   )}
                 </div>
               </details>
+            </div>
+            <div className="panel liepin-pack-panel">
+              <div className="panel-title liepin-pack-heading">
+                <span className="step dark">LP</span>
+                <div>
+                  <h2>Liepin-Codex 岗位包</h2>
+                  <p>
+                    读取猎聘项目栏生成的岗位包，预览后直接导入并打开规则审核。
+                  </p>
+                </div>
+                <button
+                  className="ghost"
+                  onClick={refreshLiepinPacks}
+                  disabled={busy}
+                >
+                  刷新岗位包
+                </button>
+              </div>
+              {!liepinConfigured ? (
+                <p className="muted">
+                  未找到 Liepin-Codex/jobs 目录，请确认本机项目目录存在。
+                </p>
+              ) : liepinPacks.length === 0 ? (
+                <p className="muted">当前没有可打开的完整岗位包。</p>
+              ) : (
+                <div className="liepin-pack-grid">
+                  <div className="liepin-pack-list">
+                    {liepinPacks.map((item) => (
+                      <article
+                        className={
+                          liepinPreview?.id === item.id
+                            ? "liepin-pack-card selected"
+                            : "liepin-pack-card"
+                        }
+                        key={item.id}
+                      >
+                        <div>
+                          <h3>{item.title}</h3>
+                          <p>{item.objective || "暂无岗位目标摘要"}</p>
+                          <small>
+                            规则 {item.ruleVersion || "—"} ·{" "}
+                            {item.approvalStatus === "approved"
+                              ? "猎聘侧已批准"
+                              : "猎聘侧草稿"}{" "}
+                            · {new Date(item.updatedAt).toLocaleDateString()}
+                          </small>
+                        </div>
+                        <div className="liepin-pack-actions">
+                          <button
+                            className="ghost"
+                            onClick={() => previewLiepinPack(item.id)}
+                            disabled={busy}
+                          >
+                            {busyAction === `liepin-preview-${item.id}`
+                              ? "正在读取…"
+                              : "预览岗位包"}
+                          </button>
+                          <button
+                            className="primary"
+                            onClick={() => importLiepinPack(item.id)}
+                            disabled={busy}
+                          >
+                            {busyAction === `liepin-import-${item.id}`
+                              ? "正在导入…"
+                              : "导入并打开规则审核"}
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                  {liepinPreview && (
+                    <div className="liepin-pack-preview">
+                      <div className="section-actions">
+                        <div>
+                          <p className="eyebrow">PACKAGE PREVIEW</p>
+                          <h3>{liepinPreview.title}</h3>
+                        </div>
+                        <button
+                          className="ghost"
+                          onClick={() => setLiepinPreview(null)}
+                        >
+                          关闭
+                        </button>
+                      </div>
+                      <p>{liepinPreview.objective}</p>
+                      <div className="liepin-file-chips">
+                        {liepinPreview.files.map((name) => (
+                          <span key={name}>{name}</span>
+                        ))}
+                      </div>
+                      <details open>
+                        <summary>招聘人员手册</summary>
+                        <pre>
+                          {liepinPreview.humanBrief || "岗位包没有 human-brief.md"}
+                        </pre>
+                      </details>
+                      <details>
+                        <summary>原始需求与 JD</summary>
+                        <pre>{liepinPreview.sourceText || "没有 source 文件"}</pre>
+                      </details>
+                      <details>
+                        <summary>机器规则（job-rules.json）</summary>
+                        <pre>
+                          {JSON.stringify(liepinPreview.rules, null, 2)}
+                        </pre>
+                      </details>
+                      <details>
+                        <summary>搜索计划（search-plan.json）</summary>
+                        <pre>
+                          {JSON.stringify(liepinPreview.searchPlan, null, 2)}
+                        </pre>
+                      </details>
+                      <button
+                        className="primary wide"
+                        onClick={() => importLiepinPack(liepinPreview.id)}
+                        disabled={busy}
+                      >
+                        {busyAction === `liepin-import-${liepinPreview.id}`
+                          ? "正在导入…"
+                          : "导入并打开规则审核"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </section>
         )}

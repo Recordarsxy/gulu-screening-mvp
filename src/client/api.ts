@@ -7,6 +7,21 @@ export type JobSummary = {
   status: "draft" | "approved" | null;
 };
 export type JobPack = any;
+export type LiepinJobPackSummary = {
+  id: string;
+  title: string;
+  objective: string;
+  approvalStatus: string;
+  ruleVersion: string;
+  updatedAt: string;
+  files: string[];
+};
+export type LiepinJobPackPreview = LiepinJobPackSummary & {
+  humanBrief: string;
+  sourceText: string;
+  rules: Record<string, unknown>;
+  searchPlan: Record<string, unknown>;
+};
 export type ResetSection = "rules" | "runs" | "results";
 export type ResetSummary = {
   jobId: string;
@@ -231,6 +246,21 @@ async function json<T>(url: string, init?: RequestInit): Promise<T> {
   return data;
 }
 export const api = {
+  listLiepinJobPacks: () =>
+    json<{
+      configured: boolean;
+      rootLabel: string;
+      items: LiepinJobPackSummary[];
+    }>("/api/integrations/liepin/job-packs"),
+  getLiepinJobPack: (id: string) =>
+    json<LiepinJobPackPreview>(
+      `/api/integrations/liepin/job-packs/${encodeURIComponent(id)}`,
+    ),
+  importLiepinJobPack: (id: string) =>
+    json<{ jobId: string; pack: JobPack; reused: boolean }>(
+      `/api/integrations/liepin/job-packs/${encodeURIComponent(id)}/import`,
+      { method: "POST" },
+    ),
   jobs: (archived = false) =>
     json<{ items: JobSummary[] }>(
       `/api/jobs${archived ? "?archived=true" : ""}`,
