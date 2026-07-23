@@ -164,13 +164,18 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
   }catch(error){next(error)}});
 
   app.get('/api/jobs/:jobId/changes',(req,res,next)=>{try{res.json({items:jobChanges.list(req.params.jobId)})}catch(error){next(error)}});
-  app.post('/api/jobs/:jobId/changes',(req,res,next)=>{try{res.status(201).json(jobChanges.create(req.params.jobId,String(req.body?.text??'')))}catch(error){next(error)}});
+  app.post('/api/jobs/:jobId/changes',async(req,res,next)=>{try{
+    const current=getCurrentVersion(db,req.params.jobId);if(!current)return res.status(404).json({error:'job_not_found'});
+    const text=String(req.body?.text??'').trim();if(!text)throw new Error('job_change_required');
+    const safeText=sanitizeTextForCloud(text);const analysis=await deepSeek.analyzeJobChange(current,safeText);
+    res.status(201).json(jobChanges.create(req.params.jobId,text,analysis));
+  }catch(error){next(error)}});
   app.post('/api/jobs/:jobId/changes/integrate',async(req,res,next)=>{try{
     const jobId=req.params.jobId;const current=getCurrentVersion(db,jobId);if(!current)return res.status(404).json({error:'job_not_found'});
     if(current.approval.status!=='approved')return res.status(409).json({error:'rules_not_approved'});
     const ids=Array.isArray(req.body?.changeIds)?req.body.changeIds.map(String):[];const notes=jobChanges.getSelected(jobId,ids);
     const job=db.prepare('SELECT source_text FROM jobs WHERE id=?').get(jobId) as {source_text:string};
-    const merged=await deepSeek.integrateJobChanges(current,sanitizeTextForCloud(job.source_text),notes.map((note)=>sanitizeTextForCloud(note.text)));
+    const merged=await deepSeek.integrateJobChanges(current,sanitizeTextForCloud(job.source_text),notes.map((note)=>({text:sanitizeTextForCloud(note.text),analysis:note.analysis})));
     const nextPack=reviseDraft(db,jobId,merged);jobChanges.markApplied(jobId,ids,nextPack.rule_version);res.json(nextPack);
   }catch(error){next(error)}});
 

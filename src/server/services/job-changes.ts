@@ -1,23 +1,23 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import { JobChangeNoteSchema, type JobChangeNote } from '../../shared/contracts.js';
+import { JobChangeNoteSchema, type JobChangeAnalysis, type JobChangeNote } from '../../shared/contracts.js';
 
-type ChangeRow={id:string;job_id:string;text:string;created_at:string;applied_rule_version:number|null};
-const fromRow=(row:ChangeRow):JobChangeNote=>JobChangeNoteSchema.parse({id:row.id,jobId:row.job_id,text:row.text,createdAt:row.created_at,appliedRuleVersion:row.applied_rule_version});
+type ChangeRow={id:string;job_id:string;text:string;created_at:string;applied_rule_version:number|null;analysis_json:string|null};
+const fromRow=(row:ChangeRow):JobChangeNote=>JobChangeNoteSchema.parse({id:row.id,jobId:row.job_id,text:row.text,createdAt:row.created_at,appliedRuleVersion:row.applied_rule_version,analysis:row.analysis_json?JSON.parse(row.analysis_json):null});
 
 export class JobChangeService {
   constructor(private readonly db:DatabaseSync) {}
 
   list(jobId:string):JobChangeNote[] {
     const job=this.db.prepare('SELECT 1 ok FROM jobs WHERE id=?').get(jobId);if(!job)throw new Error('job_not_found');
-    return (this.db.prepare('SELECT id,job_id,text,created_at,applied_rule_version FROM job_change_notes WHERE job_id=? ORDER BY created_at DESC,id DESC').all(jobId) as ChangeRow[]).map(fromRow);
+    return (this.db.prepare('SELECT id,job_id,text,created_at,applied_rule_version,analysis_json FROM job_change_notes WHERE job_id=? ORDER BY created_at DESC,id DESC').all(jobId) as ChangeRow[]).map(fromRow);
   }
 
-  create(jobId:string,text:string):JobChangeNote {
+  create(jobId:string,text:string,analysis:JobChangeAnalysis):JobChangeNote {
     const clean=text.trim();if(!clean)throw new Error('job_change_required');
     const job=this.db.prepare('SELECT 1 ok FROM jobs WHERE id=?').get(jobId);if(!job)throw new Error('job_not_found');
-    const id=randomUUID();this.db.prepare('INSERT INTO job_change_notes(id,job_id,text) VALUES (?,?,?)').run(id,jobId,clean);
-    return fromRow(this.db.prepare('SELECT id,job_id,text,created_at,applied_rule_version FROM job_change_notes WHERE id=?').get(id) as ChangeRow);
+    const id=randomUUID();this.db.prepare('INSERT INTO job_change_notes(id,job_id,text,analysis_json) VALUES (?,?,?,?)').run(id,jobId,clean,JSON.stringify(analysis));
+    return fromRow(this.db.prepare('SELECT id,job_id,text,created_at,applied_rule_version,analysis_json FROM job_change_notes WHERE id=?').get(id) as ChangeRow);
   }
 
   getSelected(jobId:string,ids:string[]):JobChangeNote[] {

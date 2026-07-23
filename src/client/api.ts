@@ -59,6 +59,12 @@ export type JobChangeNote = {
   text: string;
   createdAt: string;
   appliedRuleVersion: number | null;
+  analysis: {
+    summary:string;
+    impacts:Array<{section:"constraints.hard"|"constraints.soft"|"companies.target"|"roles.exact"|"evidence.required"|"evidence.negative"|"questions";action:"add"|"replace"|"remove"|"review";values:string[];reason:string}>;
+    questions:string[];
+    model:string;
+  } | null;
 };
 export type GuluRoundStatus =
   "pending" | "running" | "completed" | "empty" | "failed";

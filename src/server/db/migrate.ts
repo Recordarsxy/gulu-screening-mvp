@@ -227,4 +227,13 @@ export function migrate(db: DatabaseSync): void {
       db.prepare('INSERT INTO schema_migrations(version) VALUES (8)').run();db.exec('COMMIT');
     }catch(error){db.exec('ROLLBACK');throw error;}
   }
+  const version9=db.prepare('SELECT 1 ok FROM schema_migrations WHERE version=9').get();
+  if(!version9){
+    db.exec('BEGIN');
+    try{
+      const columns=db.prepare('PRAGMA table_info(job_change_notes)').all() as Array<{name:string}>;
+      if(!columns.some(column=>column.name==='analysis_json'))db.exec('ALTER TABLE job_change_notes ADD COLUMN analysis_json TEXT');
+      db.prepare('INSERT INTO schema_migrations(version) VALUES (9)').run();db.exec('COMMIT');
+    }catch(error){db.exec('ROLLBACK');throw error;}
+  }
 }

@@ -124,9 +124,22 @@ export const GuluSearchFitSchema=z.object({
 });
 export type GuluSearchFit=z.infer<typeof GuluSearchFitSchema>;
 
+export const JobChangeSectionSchema=z.enum(['constraints.hard','constraints.soft','companies.target','roles.exact','evidence.required','evidence.negative','questions']);
+export const JobChangeAnalysisSchema=z.object({
+  summary:z.string().trim().min(1),
+  impacts:z.array(z.object({
+    section:JobChangeSectionSchema,action:z.enum(['add','replace','remove','review']),
+    values:z.array(z.string().trim().min(1)).max(20),reason:z.string().trim().min(1),
+  })).max(20),
+  questions:z.array(z.string().trim().min(1)).max(10).default([]),
+  model:z.string().min(1),
+});
+export type JobChangeAnalysis=z.infer<typeof JobChangeAnalysisSchema>;
+
 export const JobChangeNoteSchema = z.object({
   id:z.string().min(1), jobId:z.string().min(1), text:z.string().trim().min(1).max(20_000),
   createdAt:z.string(), appliedRuleVersion:z.number().int().positive().nullable().default(null),
+  analysis:JobChangeAnalysisSchema.nullable().default(null),
 });
 export type JobChangeNote = z.infer<typeof JobChangeNoteSchema>;
 

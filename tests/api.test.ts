@@ -127,6 +127,11 @@ describe('local MVP API', () => {
     let mergePayload:any=null;
     const provider=new DeepSeekProvider({apiKey:'test',fetcher:async(_url,init)=>{
       const request=JSON.parse(String(init?.body??'{}'));const payload=JSON.parse(request.messages[1].content);
+      if(payload.change_text)return new Response(JSON.stringify({model:'deepseek-v4-pro',choices:[{message:{content:JSON.stringify({
+        summary:'Add cross-border supply-chain finance experience',
+        impacts:[{section:'constraints.soft',action:'add',values:['cross-border supply-chain finance'],reason:'New preferred experience'}],
+        questions:['Is this preferred or mandatory?'],
+      })}}]}),{status:200});
       if(payload.current_rules){mergePayload=payload;return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({...payload.current_rules,summary:'已整合最新变化'})}}]}),{status:200});}
       return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({...payload.template,summary:'AI 初始分析',search_plan:[...payload.template.search_plan,'公司轮：示例科技']})}}]}),{status:200});
     }});
@@ -135,10 +140,15 @@ describe('local MVP API', () => {
     const jobId=created.data.job_id;await request(`/api/jobs/${jobId}/rules/1/approve`,{method:'POST'});
     const change=await request(`/api/jobs/${jobId}/changes`,{method:'POST',body:JSON.stringify({text:'新增要求：优先跨境供应链金融经验'})});
     expect(change.status).toBe(201);
+    expect(change.data.analysis).toMatchObject({
+      summary:'Add cross-border supply-chain finance experience',
+      impacts:[{section:'constraints.soft',action:'add',values:['cross-border supply-chain finance']}],
+      model:'deepseek-v4-pro',
+    });
     const integrated=await request(`/api/jobs/${jobId}/changes/integrate`,{method:'POST',body:JSON.stringify({changeIds:[change.data.id]})});
     expect(integrated.data).toMatchObject({rule_version:2,approval:{status:'draft'},summary:'已整合最新变化'});
     const history=await request(`/api/jobs/${jobId}/changes`);
-    expect(history.data.items[0]).toMatchObject({text:'新增要求：优先跨境供应链金融经验',appliedRuleVersion:2});
-    expect(mergePayload).toMatchObject({original_source:'原始要求：负责大中华区客户拓展',changes:['新增要求：优先跨境供应链金融经验']});
+    expect(history.data.items[0]).toMatchObject({text:'新增要求：优先跨境供应链金融经验',appliedRuleVersion:2,analysis:change.data.analysis});
+    expect(mergePayload.changes[0]).toMatchObject({text:'新增要求：优先跨境供应链金融经验',analysis:{summary:'Add cross-border supply-chain finance experience'}});
   });
 });

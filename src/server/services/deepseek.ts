@@ -5,10 +5,12 @@ import {
   GuluSearchFitSchema,
   GuluSearchPlanSchema,
   GuluSearchStepSchema,
+  JobChangeAnalysisSchema,
   JobPackSchema,
   type GuluSearchCampaign,
   type GuluSearchFit,
   type GuluSearchPlan,
+  type JobChangeAnalysis,
   type JobPack,
 } from "../../shared/contracts.js";
 import { normalizeAiDraftRules } from "./job-pack.js";
@@ -314,10 +316,32 @@ export class DeepSeekProvider {
     }
   }
 
+  async analyzeJobChange(
+    pack:JobPack,
+    changeText:string,
+  ):Promise<JobChangeAnalysis>{
+    const result=await this.generateJson<Record<string,unknown>>(
+      "你是招聘岗位规则变化分析助手。判断客户新反馈会影响哪些规则栏目。只输出 summary、impacts、questions JSON。impacts 的 section 只能是 constraints.hard、constraints.soft、companies.target、roles.exact、evidence.required、evidence.negative、questions；action 只能是 add、replace、remove、review。不得使用年龄、性别、婚育等受保护属性。",
+      {
+        current_rules:{
+          constraints:pack.constraints,
+          companies:pack.companies,
+          roles:pack.roles,
+          evidence:pack.evidence,
+          questions:pack.questions,
+        },
+        change_text:changeText,
+      },
+      undefined,
+      1800,
+    );
+    return JobChangeAnalysisSchema.parse({...result.data,model:result.model});
+  }
+
   async integrateJobChanges(
     base: JobPack,
     originalSource: string,
-    changes: string[],
+    changes: Array<string|{text:string;analysis:JobChangeAnalysis|null}>,
   ): Promise<JobPack> {
     const result = await this.generateJson(
       "你是招聘岗位规则更新助手。将原始 JD、当前已批准规则和按时间排列的新变化整合为完整岗位包。新的明确要求覆盖冲突的旧要求，未被修改的规则必须保留。不得使用年龄、性别、婚育等受保护属性。只输出与 current_rules 结构一致的完整 JSON。",
