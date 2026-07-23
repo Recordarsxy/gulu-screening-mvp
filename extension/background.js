@@ -57,7 +57,7 @@ async function send(tabId, operation, args = {}) {
 async function applyFilterValueOnTab(tabId, field, value) {
   try { return await send(tabId, 'applyFilterValue', { field, value }); }
   catch (error) {
-    if (!['cities','industries','functions'].includes(field)||!String(error?.message??error).startsWith(`filter_value_unresolved:${field}:`)) throw error;
+    if (!['cities','industries','functions'].includes(field)||!new RegExp(`^filter_value_(?:unresolved|not_found):${field}:`).test(String(error?.message??error))) throw error;
     const executed=await chrome.scripting.executeScript({target:{tabId},world: 'MAIN',func:commitComtreeValueInMainWorld,args:[field,String(value)]});
     const result=executed[0]?.result;if(!result?.accepted)throw error;return result;
   }
