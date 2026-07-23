@@ -51,4 +51,10 @@ describe('Gulu campaign service',()=>{
     const empty=service.recordStepProbe(task.id,'company-seed',0);expect(empty.action).toBe('next_step');expect(empty.task).toMatchObject({currentStepId:'role-cluster'});
     expect(service.getTaskStrategy(task.id).decisions.filter((item:any)=>item.action==='probe')).toHaveLength(3);
   });
+  it('marks an unavailable taxonomy value as tried and continues adapting',()=>{
+    const {service}=setup();const taxonomyDraft={...draft,steps:[{...draft.steps[0],filters:filters({industries:['3D打印']})},draft.steps[1]]};service.saveCampaign(taxonomyDraft);service.confirmCampaign('job-1','campaign-1',taxonomyDraft);const task=service.startCampaignTask('job-1','campaign-1');service.completePreflight(task.id);
+    const next=service.recordFilterUnavailable(task.id,'company-seed','industries','3D打印');expect(next.action).toBe('refine');
+    expect(service.getTaskStrategy(task.id).decisions.at(-1)).toMatchObject({action:'probe',metrics:{resultCount:null,unavailableFilter:{field:'industries',value:'3D打印'}},rationale:expect.stringContaining('filter_unavailable'),patch:{testedFilters:taxonomyDraft.steps[0].filters}});
+    expect(()=>service.recordFilterUnavailable(task.id,'company-seed','industries','不在当前步骤')).toThrow('invalid_filter_unavailable');
+  });
 });

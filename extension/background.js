@@ -111,6 +111,11 @@ function campaignFilterKey(filters) {
     .join('|');
 }
 
+function unavailableFilter(error) {
+  const match=String(error?.message??error).match(/^filter_value_not_found:(cities|industries|functions):(.+)$/);
+  return match?{field:match[1],value:match[2]}:null;
+}
+
 function resumeSoon() {
   chrome.alarms.create('gulu-resume', { when: Date.now() + 1000 });
 }
@@ -203,7 +208,13 @@ async function runCampaignTask({ task, campaign, steps, step }) {
   if (!step) throw new Error('search_step_missing');
   const progress = task.stepProgress.find((item) => item.stepId === step.id);
   if (!progress) throw new Error('search_step_progress_missing');
-  const state = await restoreList(tab.id, step, progress.page, true);
+  let state;
+  try { state = await restoreList(tab.id, step, progress.page, true); }
+  catch (error) {
+    const missing=unavailableFilter(error);if(!missing)throw error;
+    await event(task.id, 'filter_unavailable', { stepId: step.id, ...missing }, `filter-unavailable:${task.id}:${step.id}:${campaignFilterKey(step.filters)}`);
+    resumeSoon();return;
+  }
   if (state.state === 'login_required' || state.state === 'captcha') {
     await event(task.id, 'needs_attention', { error: state.state }, `attention:${task.id}:${state.state}`);
     return;

@@ -109,11 +109,19 @@ export class GuluService {
   finishCalibration(id:string,stepId:string):GuluConnectorTask {this.db.prepare("UPDATE gulu_task_steps SET status='running',updated_at=CURRENT_TIMESTAMP WHERE task_id=? AND step_id=?").run(id,stepId);this.db.prepare("UPDATE gulu_tasks SET phase='search',updated_at=CURRENT_TIMESTAMP WHERE id=?").run(id);return this.getTask(id);}
   recordStrategyDecision(id:string,stepId:string,action:string,metrics:Record<string,unknown>,rationale:string,patch:Record<string,unknown>={}):void {this.db.prepare('INSERT INTO gulu_strategy_decisions(id,task_id,step_id,action,metrics_json,rationale,patch_json) VALUES (?,?,?,?,?,?,?)').run(randomUUID(),id,stepId,action,JSON.stringify(metrics),rationale.slice(0,1000),JSON.stringify(patch));}
   recordStepProbe(id:string,stepId:string,resultCount:number){
+    return this.recordAdaptiveProbe(id,stepId,resultCount);
+  }
+  recordFilterUnavailable(id:string,stepId:string,field:string,value:string){
+    if(!['cities','industries','functions'].includes(field)||!value.trim())throw new Error('invalid_filter_unavailable');
+    const current=this.getCurrentCampaignStep(id);if(!current||!current.filters[field as 'cities'|'industries'|'functions'].includes(value.trim()))throw new Error('invalid_filter_unavailable');
+    return this.recordAdaptiveProbe(id,stepId,0,{field,value:value.trim()});
+  }
+  private recordAdaptiveProbe(id:string,stepId:string,resultCount:number,unavailableFilter?:{field:string;value:string}){
     const task=this.getTask(id);if(!task.campaignId)throw new Error('campaign_not_found');if(task.currentStepId!==stepId)throw new Error('invalid_step');if(!Number.isInteger(resultCount)||resultCount<0)throw new Error('invalid_probe_count');
     const current=this.getCurrentCampaignStep(id);if(!current)throw new Error('invalid_step');const strategy=this.getTaskStrategy(id);
     const triedFingerprints=strategy.decisions.filter((item:any)=>item.stepId===stepId&&item.action==='probe'&&item.patch?.testedFilters).map((item:any)=>searchFingerprint(item.patch.testedFilters));
     const decision=planAdaptiveProbe({campaign:strategy.campaign,seedStepId:stepId,currentFilters:current.filters,resultCount,triedFingerprints});
-    this.recordStrategyDecision(id,stepId,'probe',{resultCount},decision.rationale,{testedFilters:current.filters,nextFilters:decision.filters,probeAction:decision.action});
+    this.recordStrategyDecision(id,stepId,'probe',unavailableFilter?{resultCount:null,unavailableFilter}:{resultCount},unavailableFilter?`filter_unavailable:${decision.rationale}`:decision.rationale,{testedFilters:current.filters,nextFilters:decision.filters,probeAction:decision.action});
     if(decision.action==='refine'){
       const step=GuluSearchStepSchema.parse({...current,filters:decision.filters});
       this.db.prepare("UPDATE gulu_task_steps SET step_json=?,status='pending',page=1,candidate_cursor=0,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE task_id=? AND step_id=?").run(JSON.stringify(step),id,stepId);

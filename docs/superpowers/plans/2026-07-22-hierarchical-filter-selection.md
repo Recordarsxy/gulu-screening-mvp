@@ -81,3 +81,11 @@ Confirm the effective URL keeps `savedSearchId=94096`, contains no `owner__` and
 - [ ] **Step 4: Record outcome**
 
 Report the fresh task ID, effective filter evidence, result count/action, and whether candidate reading began. Do not create a v1.3.0 tag or Release.
+
+### 2026-07-23 addendum: unavailable taxonomy labels
+
+- [x] Add a failing adapter regression test that distinguishes an absent tree node from an unresolved existing node.
+- [x] Emit `filter_unavailable` and let the adaptive planner mark the current fingerprint as tried without claiming a real zero-result search.
+- [x] Keep existing-node commit failures as `needs_attention`.
+- [x] Run full verification (168 tests, typecheck, build, lint).
+- [ ] Push the revision and repeat the fresh formal Meshy run through the formerly blocking labels.
