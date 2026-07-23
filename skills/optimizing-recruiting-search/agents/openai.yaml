@@ -1,0 +1,4 @@
+interface:
+  display_name: "Recruiting Search Optimizer"
+  short_description: "Build adaptive evidence-based candidate search campaigns"
+  default_prompt: "Use $optimizing-recruiting-search to improve candidate search and evidence-based matching."
