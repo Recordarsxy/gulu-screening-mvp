@@ -47,4 +47,13 @@ describe("v1.3 adaptive campaign UI", () => {
     expect(source).toContain("<CampaignPanel");
     expect(source).toContain("GULU SCREENING v1.3.0");
   });
+  it("keeps high matches in results and exposes verification candidates in the run center",async()=>{
+    const api=await readFile(new URL("../src/client/api.ts",import.meta.url),"utf8");
+    const app=await readFile(new URL("../src/client/App.tsx",import.meta.url),"utf8");
+    expect(api).toContain('bucket?: ResultBucket');
+    expect(app).toContain('"verification"');
+    expect(app).toContain('待验证人才');
+    expect(app).toContain('在谷露中查看');
+    expect(app).toContain('rel="noopener noreferrer"');
+  });
 });

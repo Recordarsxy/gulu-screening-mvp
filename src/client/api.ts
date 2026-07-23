@@ -27,7 +27,14 @@ export type ResultItem = {
   ruleVersion: number;
   reviewStatus: string;
   note: string;
+  searchFit?: number;
+  gaps?: string[];
+  dimensions?: Array<{id:string;earned:number;possible:number;confidence:string;evidence:string[];gaps:string[]}>;
+  verificationQuestions?: string[];
+  policyVersion?: string;
+  guluUrl?: string | null;
 };
+export type ResultBucket = "high_fit" | "verification";
 export type RunRecord = {
   id: string;
   jobId: string;
@@ -306,9 +313,9 @@ export const api = {
     json<T>(`/api/runs/${id}/resume`, { method: "POST" }),
   stopRun: (id: string) =>
     json<GuluTask>(`/api/runs/${id}/stop`, { method: "POST" }),
-  results: (id: string, runId?: string) =>
+  results: (id: string, runId?: string, bucket?: ResultBucket) =>
     json<{ items: ResultItem[] }>(
-      `/api/jobs/${id}/results${runId ? `?runId=${encodeURIComponent(runId)}` : ""}`,
+      `/api/jobs/${id}/results${runId ? `?runId=${encodeURIComponent(runId)}${bucket ? `&bucket=${bucket}` : ""}` : ""}`,
     ),
   review: (
     jobId: string,

@@ -58,6 +58,7 @@ export function App() {
     [plan, setPlan] = useState<GuluPlan | null>(null),
     [task, setTask] = useState<GuluTask | null>(null);
   const [campaign, setCampaign] = useState<GuluSearchCampaign | null>(null);
+  const [verificationResults, setVerificationResults] = useState<ResultItem[]>([]);
   const [taskHistory, setTaskHistory] = useState<GuluTask[]>([]),
     [confirmFresh, setConfirmFresh] = useState(false),
     [archiveTarget, setArchiveTarget] = useState<JobSummary | null>(null),
@@ -100,9 +101,14 @@ export function App() {
               items.map((item) => (item.id === next.id ? next : item)),
             );
             if (next.campaignId)
-              api
-                .getRunStrategy(next.id)
-                .then((strategy) => setCampaign(strategy.campaign))
+              Promise.all([
+                api.getRunStrategy(next.id),
+                api.results(next.jobId, next.id, "verification"),
+              ])
+                .then(([strategy, verification]) => {
+                  setCampaign(strategy.campaign);
+                  setVerificationResults(verification.items);
+                })
                 .catch(() => {});
             else if (next.status === "completed")
               api
@@ -143,6 +149,11 @@ export function App() {
           : null,
       );
       setResultsRunId(current?.id ?? "");
+      setVerificationResults(
+        current?.campaignId
+          ? (await api.results(id, current.id, "verification")).items
+          : [],
+      );
       setView(next);
       if (next === "results")
         setResults((await api.results(id, current?.id)).items);
@@ -756,6 +767,10 @@ export function App() {
                       setTask(next);
                       setTaskHistory((items) => [next, ...items]);
                       setResultsRunId(next.id);
+                      api
+                        .results(selected, next.id, "verification")
+                        .then((data) => setVerificationResults(data.items))
+                        .catch(() => setVerificationResults([]));
                     }}
                     busy={busy}
                     setBusy={setBusy}
@@ -845,6 +860,16 @@ export function App() {
                     <TaskProgress task={task} onUpdate={setTask} />
                   )}
                   <TaskHistory tasks={taskHistory} onResults={showRunResults} />
+                  <VerificationPanel
+                    items={verificationResults}
+                    runId={task?.id ?? ""}
+                    reload={() =>
+                      task &&
+                      api
+                        .results(selected, task.id, "verification")
+                        .then((data) => setVerificationResults(data.items))
+                    }
+                  />
                 </div>
                 <div className="panel">
                   <div className="panel-title">
@@ -1537,6 +1562,14 @@ function ResultCard({
         <p>
           {item.currentCompany} · {item.currentRole}
         </p>
+        {typeof item.searchFit === "number" && <b>匹配分 {item.searchFit}</b>}
+        {item.guluUrl && (
+          <p>
+            <a href={item.guluUrl} target="_blank" rel="noopener noreferrer">
+              在谷露中查看
+            </a>
+          </p>
+        )}
       </div>
       <div className="evidence">
         <b>{item.reasonCode}</b>
@@ -1571,5 +1604,53 @@ function ResultCard({
         </button>
       </div>
     </article>
+  );
+}
+
+function VerificationPanel({
+  items,
+  runId,
+  reload,
+}: {
+  items: ResultItem[];
+  runId: string;
+  reload: () => void;
+}) {
+  if (!runId) return null;
+  return (
+    <div className="rule-card verification-panel">
+      <div className="section-actions">
+        <div>
+          <h3>待验证人才</h3>
+          <p>匹配分 55–69：有潜力，但需要补充信息，不进入高匹配候选结果。</p>
+        </div>
+        <button className="ghost" onClick={reload}>刷新</button>
+      </div>
+      {!items.length ? (
+        <p className="muted">当前没有待验证人才。</p>
+      ) : (
+        <div className="result-list">
+          {items.map((item) => (
+            <article className="result-card" key={item.candidateId}>
+              <div className="label review">{item.searchFit ?? "—"} 分</div>
+              <div className="person">
+                <h3>{item.name}</h3>
+                <p>{item.currentCompany} · {item.currentRole}</p>
+                {item.guluUrl && (
+                  <a href={item.guluUrl} target="_blank" rel="noopener noreferrer">
+                    在谷露中查看
+                  </a>
+                )}
+              </div>
+              <div className="evidence">
+                {item.evidence.map((text) => <p key={`e-${text}`}>✓ {text}</p>)}
+                {(item.gaps ?? []).map((text) => <p key={`g-${text}`}>待核实：{text}</p>)}
+                {(item.verificationQuestions ?? []).map((text) => <p key={`q-${text}`}>问题：{text}</p>)}
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

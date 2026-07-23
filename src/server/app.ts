@@ -15,6 +15,7 @@ import { GuluService } from './services/gulu.js';
 import { JobChangeService } from './services/job-changes.js';
 import { archiveJob, restoreJob } from './services/job-archive.js';
 import { resetJobSection, type JobResetSection } from './services/job-reset.js';
+import { safeGuluCandidateUrl } from '../shared/gulu-link.js';
 
 type AppDeps = { db: DatabaseSync; dataRoot: string; deepSeek?: DeepSeekProvider; jobPackTimeoutMs?:number };
 
@@ -239,20 +240,30 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
   app.get('/api/jobs/:jobId/results', (req, res) => {
     const runId=typeof req.query.runId==='string'?req.query.runId:'';
     if(runId){
+      const bucket=req.query.bucket==='verification'?'verification':'high_fit';
       const scopedTask=db.prepare('SELECT campaign_id campaignId FROM gulu_tasks WHERE id=? AND job_id=?').get(runId,req.params.jobId) as {campaignId:string|null}|undefined;
       if(!scopedTask)return res.status(404).json({error:'run_not_found'});
       const items=db.prepare(`SELECT c.id candidateId,c.name,c.gulu_id guluId,c.detail_url detailUrl,c.current_company currentCompany,
         c.current_role currentRole,c.source_round sourceRound,a.label,a.reason_code reasonCode,a.evidence_json evidence,
         a.rule_version ruleVersion,a.assessed_at assessedAt,COALESCE(h.status,'未复核') reviewStatus,COALESCE(h.note,'') note,
-        sf.score searchFit
+        sf.score searchFit,sf.evidence_json fitEvidence,sf.gaps_json gaps,sf.dimensions_json dimensions,
+        sf.verification_questions_json verificationQuestions,sf.policy_version policyVersion
         FROM candidates c JOIN gulu_task_candidates tc ON tc.candidate_id=c.id
         JOIN gulu_tasks t ON t.id=tc.task_id AND t.job_id=c.job_id
         JOIN assessments a ON a.candidate_id=c.id AND a.rule_version=t.rule_version
         LEFT JOIN gulu_search_fits sf ON sf.task_id=t.id AND sf.candidate_id=c.id
         LEFT JOIN human_reviews h ON h.candidate_id=c.id AND h.rule_version=a.rule_version
-        WHERE c.job_id=? AND t.id=? AND (?=0 OR (sf.score>=70 AND a.label<>'exclude'))
+        WHERE c.job_id=? AND t.id=? AND
+          (?=0 OR (a.label<>'exclude' AND ((?='high_fit' AND sf.score>=70) OR (?='verification' AND sf.score BETWEEN 55 AND 69))))
         ORDER BY sf.score DESC,CASE a.label WHEN 'recommend' THEN 1 WHEN 'review' THEN 2 ELSE 3 END,c.name`)
-        .all(req.params.jobId,runId,scopedTask.campaignId?1:0).map((row:any)=>({...row,evidence:JSON.parse(row.evidence)}));
+        .all(req.params.jobId,runId,scopedTask.campaignId?1:0,bucket,bucket).map((row:any)=>({
+          ...row,
+          evidence:JSON.parse(row.fitEvidence||row.evidence||'[]'),
+          gaps:JSON.parse(row.gaps||'[]'),
+          dimensions:JSON.parse(row.dimensions||'[]'),
+          verificationQuestions:JSON.parse(row.verificationQuestions||'[]'),
+          guluUrl:safeGuluCandidateUrl(row.detailUrl,row.guluId),
+        }));
       return res.json({items});
     }
     const items = db.prepare(`SELECT c.id candidateId,c.name,c.gulu_id guluId,c.detail_url detailUrl,c.current_company currentCompany,

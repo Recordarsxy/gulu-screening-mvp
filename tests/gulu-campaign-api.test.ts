@@ -32,15 +32,21 @@ describe('adaptive campaign API',()=>{
     createDraft(db,{jobId:'job-fit',title:'Sales leader',sourceText:'JD'});approveVersion(db,'job-fit',1);
     db.prepare("INSERT INTO gulu_search_campaigns(id,job_id,version,rule_version,status,campaign_json) VALUES (?,?,?,?,?,?)").run('campaign-fit','job-fit',1,1,'confirmed','{}');
     db.prepare("INSERT INTO gulu_tasks(id,job_id,rule_version,status,mode,plan_json,campaign_id,campaign_version) VALUES (?,?,?,?,?,?,?,?)").run('task-fit','job-fit',1,'completed','formal','{}','campaign-fit',1);
-    for(const [id,name,score,label] of [['low','Low Fit',69,'review'],['high','High Fit',70,'review'],['excluded','Excluded High Fit',90,'exclude']] as const){
-      db.prepare("INSERT INTO candidates(id,job_id,dedupe_key,name,current_company,current_role,experiences_json) VALUES (?,?,?,?,?,?,?)").run(id,'job-fit',`dedupe-${id}`,name,'Company','Role','[]');
+    for(const [id,name,score,label] of [['too-low','Too Low',54,'review'],['verify-low','Verification Low',55,'review'],['low','Low Fit',69,'review'],['high','High Fit',70,'review'],['excluded','Excluded High Fit',90,'exclude']] as const){
+      db.prepare("INSERT INTO candidates(id,job_id,dedupe_key,name,gulu_id,detail_url,current_company,current_role,experiences_json) VALUES (?,?,?,?,?,?,?,?,?)").run(id,'job-fit',`dedupe-${id}`,name,`G-${id}`,`http://121.43.105.7/crm#candidate/detail?id=G-${id}`,'Company','Role','[]');
       db.prepare("INSERT INTO assessments(id,job_id,candidate_id,rule_version,label,reason_code,evidence_json,model) VALUES (?,?,?,?,?,?,?,?)").run(`assessment-${id}`,'job-fit',id,1,label,'NEEDS_REVIEW','[]','deepseek-v4-flash');
       db.prepare("INSERT INTO gulu_task_candidates(task_id,candidate_id) VALUES (?,?)").run('task-fit',id);
-      db.prepare("INSERT INTO gulu_search_fits(task_id,candidate_id,step_id,score,evidence_json,gaps_json,model) VALUES (?,?,?,?,?,?,?)").run('task-fit',id,'step-1',score,'[]','[]','deepseek-v4-flash');
+      db.prepare("INSERT INTO gulu_search_fits(task_id,candidate_id,step_id,score,evidence_json,gaps_json,verification_questions_json,policy_version,model) VALUES (?,?,?,?,?,?,?,?,?)").run('task-fit',id,'step-1',score,'[\"命中证据\"]','[\"信息缺口\"]','[\"待确认问题\"]','general-v1','deepseek-v4-flash');
     }
     const ai=new DeepSeekProvider({apiKey:'test'});const http=createApp({db,dataRoot:root,deepSeek:ai}).listen(0,'127.0.0.1');await new Promise<void>(resolve=>http.once('listening',resolve));cleanups.push(()=>{http.close()});const port=(http.address() as AddressInfo).port;
     const response=await fetch(`http://127.0.0.1:${port}/api/jobs/job-fit/results?runId=task-fit`);const body=await response.json() as {items:Array<{name:string;searchFit:number}>};
     expect(body.items).toEqual([expect.objectContaining({name:'High Fit',searchFit:70})]);
-    expect((db.prepare("SELECT COUNT(*) count FROM gulu_search_fits WHERE task_id='task-fit'").get() as {count:number}).count).toBe(3);
+    const verificationResponse=await fetch(`http://127.0.0.1:${port}/api/jobs/job-fit/results?runId=task-fit&bucket=verification`);
+    const verification=await verificationResponse.json() as {items:Array<{name:string;searchFit:number;guluUrl:string;verificationQuestions:string[]}>};
+    expect(verification.items).toEqual([
+      expect.objectContaining({name:'Low Fit',searchFit:69,guluUrl:'http://121.43.105.7/crm#candidate/detail?id=G-low',verificationQuestions:['待确认问题']}),
+      expect.objectContaining({name:'Verification Low',searchFit:55}),
+    ]);
+    expect((db.prepare("SELECT COUNT(*) count FROM gulu_search_fits WHERE task_id='task-fit'").get() as {count:number}).count).toBe(5);
   });
 });
