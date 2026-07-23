@@ -36,7 +36,7 @@ describe('adaptive campaign API',()=>{
       db.prepare("INSERT INTO candidates(id,job_id,dedupe_key,name,gulu_id,detail_url,current_company,current_role,experiences_json) VALUES (?,?,?,?,?,?,?,?,?)").run(id,'job-fit',`dedupe-${id}`,name,`G-${id}`,`http://121.43.105.7/crm#candidate/detail?id=G-${id}`,'Company','Role','[]');
       db.prepare("INSERT INTO assessments(id,job_id,candidate_id,rule_version,label,reason_code,evidence_json,model) VALUES (?,?,?,?,?,?,?,?)").run(`assessment-${id}`,'job-fit',id,1,label,'NEEDS_REVIEW','[]','deepseek-v4-flash');
       db.prepare("INSERT INTO gulu_task_candidates(task_id,candidate_id) VALUES (?,?)").run('task-fit',id);
-      db.prepare("INSERT INTO gulu_search_fits(task_id,candidate_id,step_id,score,evidence_json,gaps_json,verification_questions_json,policy_version,model) VALUES (?,?,?,?,?,?,?,?,?)").run('task-fit',id,'step-1',score,'[\"命中证据\"]','[\"信息缺口\"]','[\"待确认问题\"]','general-v1','deepseek-v4-flash');
+      db.prepare("INSERT INTO gulu_search_fits(task_id,candidate_id,step_id,score,evidence_json,gaps_json,verification_questions_json,policy_version,model) VALUES (?,?,?,?,?,?,?,?,?)").run('task-fit',id,'step-1',score,'["命中证据"]','["信息缺口"]','["待确认问题"]','general-v1','deepseek-v4-flash');
     }
     const ai=new DeepSeekProvider({apiKey:'test'});const http=createApp({db,dataRoot:root,deepSeek:ai}).listen(0,'127.0.0.1');await new Promise<void>(resolve=>http.once('listening',resolve));cleanups.push(()=>{http.close()});const port=(http.address() as AddressInfo).port;
     const response=await fetch(`http://127.0.0.1:${port}/api/jobs/job-fit/results?runId=task-fit`);const body=await response.json() as {items:Array<{name:string;searchFit:number}>};
