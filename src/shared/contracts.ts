@@ -92,15 +92,38 @@ export const GuluSearchStepSchema=z.object({
   expectedSignals:z.array(z.string().trim().min(1)).max(12).default([]),limit:z.number().int().min(5).max(40),enabled:z.boolean().default(true),
   filters:GuluFiltersSchema,sources:z.array(GuluSearchSourceSchema).max(100).default([]),
 });
+export const GuluTalentArchetypeSchema=z.object({
+  name:z.string().trim().min(1).max(120),
+  whyFit:z.string().trim().min(1).max(1000),
+  likelyCompanies:z.array(z.string().trim().min(1)).max(20).default([]),
+  likelyRoles:z.array(z.string().trim().min(1)).max(20).default([]),
+  tradeoffs:z.array(z.string().trim().min(1)).max(8).default([]),
+});
+export const GuluStrategyBriefSchema=z.object({
+  businessObjective:z.string().trim().min(1).max(1500),
+  hiringThesis:z.string().trim().min(1).max(1500),
+  criticalOutcomes:z.array(z.string().trim().min(1)).min(1).max(8),
+  successEvidence:z.array(z.string().trim().min(1)).min(1).max(10),
+  talentArchetypes:z.array(GuluTalentArchetypeSchema).min(1).max(6),
+  marketMap:z.object({
+    corePools:z.array(z.string().trim().min(1)).max(12).default([]),
+    adjacentPools:z.array(z.string().trim().min(1)).max(12).default([]),
+    transferLogic:z.string().trim().min(1).max(1500),
+  }),
+  risks:z.array(z.string().trim().min(1)).max(10).default([]),
+  adaptationLogic:z.array(z.string().trim().min(1)).min(1).max(10),
+});
 export const GuluSearchCampaignSchema=z.object({
   id:z.string().min(1),jobId:z.string().min(1),ruleVersion:z.number().int().positive(),version:z.number().int().positive().default(1),
   status:z.enum(['draft','confirmed']).default('draft'),summary:z.string().trim().min(1).max(3000),sourceNotes:z.string().max(20_000).default(''),
+  strategyBrief:GuluStrategyBriefSchema.optional(),
   targetShortlist:z.number().int().min(5).max(15).default(10),maxUniqueCandidates:z.number().int().min(20).max(150).default(150),maxSteps:z.number().int().min(1).max(8).default(8),
   steps:z.array(GuluSearchStepSchema).min(1).max(8),confirmedAt:z.string().datetime().nullable().default(null),
   createdAt:z.string().datetime().default(()=>new Date().toISOString()),updatedAt:z.string().datetime().default(()=>new Date().toISOString()),
 });
 export type GuluSearchCampaign=z.infer<typeof GuluSearchCampaignSchema>;
 export type GuluSearchStep=z.infer<typeof GuluSearchStepSchema>;
+export type GuluStrategyBrief=z.infer<typeof GuluStrategyBriefSchema>;
 
 export const GuluStepProgressSchema=z.object({
   stepId:z.string().min(1),status:z.enum(['pending','preflighting','calibrating','running','empty','completed','skipped','failed']).default('pending'),

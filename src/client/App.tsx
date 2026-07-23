@@ -129,11 +129,12 @@ export function App() {
   const openJob = async (id: string, next: View = "rules") => {
     beginBusy();
     try {
-      const [data, savedPlan, changeData, runData] = await Promise.all([
+      const [data, savedPlan, changeData, runData, latestCampaign] = await Promise.all([
         api.getJob(id),
         api.getGuluPlan(id).catch(() => null),
         api.listChanges(id),
         api.listGuluRuns(id),
+        api.getLatestCampaign(id).catch(() => null),
       ]);
       const current =
         runData.items.find((item) => !terminalTask(item.status)) ??
@@ -151,7 +152,7 @@ export function App() {
         current?.campaignId
           ? ((await api.getRunStrategy(current.id).catch(() => null))
               ?.campaign ?? null)
-          : null,
+          : latestCampaign,
       );
       setResultsRunId(current?.id ?? "");
       setVerificationResults(

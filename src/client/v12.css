@@ -325,11 +325,73 @@
   border: 0;
   background: transparent;
 }
+.strategy-brief {
+  background: #fff;
+  border: 1px solid #cfe1e7;
+  border-radius: 13px;
+  padding: 16px;
+  margin: 14px 0;
+}
+.strategy-brief h3 {
+  color: #173f53;
+  font-size: 13px;
+  margin: 14px 0 7px;
+}
+.strategy-brief p {
+  color: #4e6875;
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 4px 0;
+}
+.strategy-brief-lead,
+.strategy-brief-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.strategy-brief-lead > div {
+  background: #eef7fa;
+  border-radius: 9px;
+  padding: 12px;
+}
+.strategy-brief-lead small {
+  display: block;
+  color: #14708a;
+  font-size: 10px;
+  font-weight: 800;
+  margin-bottom: 5px;
+}
+.talent-archetypes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 9px;
+}
+.talent-archetypes article {
+  border: 1px solid #dce9ed;
+  border-radius: 9px;
+  padding: 11px;
+}
+.talent-archetypes b {
+  color: #173f53;
+  font-size: 12px;
+}
+.talent-archetypes small {
+  color: #718995;
+  display: block;
+  font-size: 10px;
+  line-height: 1.5;
+  margin-top: 4px;
+}
 .campaign-summary {
   background: #e5f1f5;
   border-radius: 9px;
   padding: 12px;
   color: #31596a;
+}
+.taxonomy-note {
+  color: #6a7780;
+  font-size: 11px;
+  margin: 6px 2px 12px;
 }
 .campaign-steps {
   display: grid;
@@ -375,6 +437,14 @@
 .campaign-step > p {
   color: #607985;
   font-size: 12px;
+}
+.campaign-step .step-objective {
+  color: #244f62;
+}
+.campaign-step .step-signals {
+  background: #f3f8fa;
+  border-radius: 7px;
+  padding: 8px;
 }
 .step-actions {
   display: flex;

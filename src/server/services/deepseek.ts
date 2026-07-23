@@ -5,6 +5,7 @@ import {
   GuluSearchFitSchema,
   GuluSearchPlanSchema,
   GuluSearchStepSchema,
+  GuluStrategyBriefSchema,
   JobChangeAnalysisSchema,
   JobPackSchema,
   type GuluSearchCampaign,
@@ -495,10 +496,12 @@ export class DeepSeekProvider {
     pack: JobPack,
     sourceNotes = "",
     history: Array<Record<string, unknown>> = [],
+    originalSource = "",
   ): Promise<DeepSeekResult<GuluSearchCampaign>> {
     const result = await this.generateStrategyJson<Record<string, unknown>>(
-      "你是资深招聘寻访策略师。基于已批准岗位规则，为谷露生成4至8个互补且不重复的搜索假设。每个初始步骤只能使用一个筛选维度：单一目标公司方向、宽职位核心、市场行业或城市方向；不得一开始叠加多个维度。必须同时覆盖公司方向和职位方向。实际运行时结果大于40才增加第二个已批准维度，1至40立即读取，结果为0则换同义词或下一假设，已知空集合不得尝试更严格超集。字段仅限keywords、companies、roles、cities、industries、functions；每步5至40人，总计不超过150人。职位、行业、城市和职能只能使用规则或用户输入，公司可以推导相邻人才公司。每步必须说明objective、rationale、expectedSignals和sources。只输出summary、targetShortlist、steps JSON。",
+      "你是一名资深猎头寻访策略师，不是关键词抽取器。先完整理解原始 JD、已批准规则、客户补充和历史搜索结果，判断客户招聘背后的业务问题、入职后必须实现的关键结果、哪些履历证据能证明成功，以及哪些相邻人才可以迁移。再建立2至6类互补人才画像和市场地图，最后把每一类画像转成可验证的搜索假设。不要只是复述 JD 标签，也不要因为 JD 没写公司名就停止推理；可以基于产品、客户、商业模式、销售复杂度和成长阶段推导合理公司池，并明确迁移逻辑与风险。输出 strategyBrief：businessObjective、hiringThesis、criticalOutcomes、successEvidence、talentArchetypes（name、whyFit、likelyCompanies、likelyRoles、tradeoffs）、marketMap（corePools、adjacentPools、transferLogic）、risks、adaptationLogic。然后输出4至8个互补且不重复的 steps。每个初始步骤只能使用一个筛选维度：单一目标公司方向、宽职位核心、市场行业或城市方向；不得一开始叠加多个维度。必须同时覆盖公司方向和职位方向。实际运行时结果大于40才增加第二个已批准维度，1至40立即读取，结果为0则换同义词或下一假设，已知空集合不得尝试更严格超集。字段仅限keywords、companies、roles、cities、industries、functions；每步5至40人，总计不超过150人。每步的 objective 要说明验证哪种人才假设，rationale 要说明为什么这类人才可能成功，expectedSignals 要写预期在简历中看到的成功证据。只输出 summary、strategyBrief、targetShortlist、steps JSON。",
       {
+        original_jd: originalSource,
         rules: {
           constraints: pack.constraints,
           industries: pack.industries,
@@ -511,9 +514,91 @@ export class DeepSeekProvider {
       },
       8000,
     );
-    const rawSteps = Array.isArray(result.data.steps) ? result.data.steps : [];
-    if (rawSteps.length < 3 || rawSteps.length > 8)
-      throw new DeepSeekError("invalid_campaign");
+    const stringArray=(value:unknown)=>
+      (Array.isArray(value)?value:typeof value==="string"?[value]:[])
+        .map(String)
+        .map((item)=>item.trim())
+        .filter(Boolean);
+    const rawBrief=(
+      result.data.strategyBrief&&typeof result.data.strategyBrief==="object"
+        ? result.data.strategyBrief
+        : {}
+    ) as Record<string,unknown>;
+    const rawMarket=(
+      rawBrief.marketMap&&typeof rawBrief.marketMap==="object"
+        ? rawBrief.marketMap
+        : {}
+    ) as Record<string,unknown>;
+    const rawArchetypes=Array.isArray(rawBrief.talentArchetypes)
+      ? rawBrief.talentArchetypes
+      : [];
+    const strategyBrief=GuluStrategyBriefSchema.parse({
+      businessObjective:String(
+        rawBrief.businessObjective??pack.summary??"解决岗位对应的业务增长问题",
+      ),
+      hiringThesis:String(
+        rawBrief.hiringThesis??pack.ideal_candidate??"用可验证经历寻找最可能成功的人才",
+      ),
+      criticalOutcomes:
+        stringArray(rawBrief.criticalOutcomes).length
+          ? stringArray(rawBrief.criticalOutcomes)
+          : [pack.summary||"在目标岗位交付可验证业务结果"],
+      successEvidence:
+        stringArray(rawBrief.successEvidence).length
+          ? stringArray(rawBrief.successEvidence)
+          : pack.evidence.required.length
+            ? pack.evidence.required
+            : ["简历中存在与岗位目标直接相关的可验证成果"],
+      talentArchetypes:
+        rawArchetypes.length
+          ? rawArchetypes.map((raw,index)=>{
+              const archetype=(
+                raw&&typeof raw==="object"?raw:{}
+              ) as Record<string,unknown>;
+              return {
+                name:String(archetype.name??`人才画像 ${index+1}`),
+                whyFit:String(archetype.whyFit??"具备可迁移的岗位成功能力"),
+                likelyCompanies:stringArray(archetype.likelyCompanies),
+                likelyRoles:stringArray(archetype.likelyRoles),
+                tradeoffs:stringArray(archetype.tradeoffs),
+              };
+            })
+          : [{
+              name:"核心岗位直接匹配者",
+              whyFit:pack.ideal_candidate||"履历直接覆盖岗位核心要求",
+              likelyCompanies:pack.companies.target,
+              likelyRoles:[...pack.roles.exact,...pack.roles.synonyms],
+              tradeoffs:["仍需用简历证据验证实际业绩与职责范围"],
+            }],
+      marketMap:{
+        corePools:
+          stringArray(rawMarket.corePools).length
+            ? stringArray(rawMarket.corePools)
+            : [...pack.companies.target,...pack.industries.target].slice(0,12),
+        adjacentPools:
+          stringArray(rawMarket.adjacentPools).length
+            ? stringArray(rawMarket.adjacentPools)
+            : [...pack.industries.adjacent,...pack.roles.adjacent].slice(0,12),
+        transferLogic:String(
+          rawMarket.transferLogic??"先验证核心能力和成果证据，再判断行业知识能否迁移。",
+        ),
+      },
+      risks:
+        stringArray(rawBrief.risks).length
+          ? stringArray(rawBrief.risks)
+          : pack.evidence.negative,
+      adaptationLogic:
+        stringArray(rawBrief.adaptationLogic).length
+          ? stringArray(rawBrief.adaptationLogic)
+          : [
+              "结果大于40时增加第二个已批准维度缩小范围",
+              "结果为1至40时立即遍历候选人",
+              "结果为0时切换同义词或下一人才画像",
+            ],
+    });
+    const rawSteps = (
+      Array.isArray(result.data.steps) ? result.data.steps : []
+    ).slice(0, 8);
     const empty = {
       keywords: [],
       companies: [],
@@ -574,17 +659,35 @@ export class DeepSeekProvider {
               : "来自已批准岗位搜索词",
         })),
       );
+      const allowedTypes=new Set([
+        "seed_company",
+        "role_cluster",
+        "market_cluster",
+        "company_expansion",
+        "manual",
+        "legacy",
+      ]);
+      const type=allowedTypes.has(String(item.type))
+        ? String(item.type)
+        : inferredType;
+      const title=String(
+        item.title??item.objective??`搜索步骤 ${index+1}`,
+      ).slice(0,120);
+      const objective=String(
+        item.objective??item.title??"验证人才画像假设",
+      ).slice(0,500);
+      const rationale=`${String(
+        item.rationale??"基于招聘目标与人才市场迁移逻辑生成",
+      )} 执行时先用单一维度验证人才池；结果大于40再增加第二维度，1至40直接读取，0人则换方向。`.slice(0,1000);
       return GuluSearchStepSchema.parse({
         ...item,
         id: String(item.id ?? randomUUID()),
         order: index,
-        type: item.type ?? inferredType,
-        title: item.title ?? `搜索步骤 ${index + 1}`,
-        objective: item.objective ?? String(item.title ?? "验证人才方向"),
-        rationale: item.rationale ?? "基于批准岗位规则生成",
-        expectedSignals: Array.isArray(item.expectedSignals)
-          ? item.expectedSignals
-          : [],
+        type,
+        title,
+        objective,
+        rationale,
+        expectedSignals:stringArray(item.expectedSignals).slice(0,12),
         limit: Math.min(40, Math.max(5, Number(item.limit) || 20)),
         enabled: item.enabled !== false,
         filters,
@@ -653,25 +756,31 @@ export class DeepSeekProvider {
         values: pack.constraints.hard,
       },
     ];
-    const roleFallback = fallbacks.find(
-      (fallback) => fallback.field === "roles" && fallback.values.length > 0,
+    const requiredDirections = fallbacks.filter(
+      (fallback) =>
+        ["companies", "roles"].includes(fallback.field) &&
+        fallback.values.length > 0,
     );
-    if (roleFallback && !steps.some((step) => step.filters.roles.length > 0)) {
+    for (const fallback of requiredDirections) {
+      if (steps.some((step) => step.filters[fallback.field].length > 0))
+        continue;
       if (steps.length >= 8) {
         const removed = steps.pop();
         if (removed) seen.delete(searchFingerprint(removed.filters));
       }
       const filters = {
         ...empty,
-        roles: roleFallback.values.map((value) => value.trim()).filter(Boolean),
+        [fallback.field]: fallback.values
+          .map((value) => value.trim())
+          .filter(Boolean),
       };
       add(
         buildStep(
           {
-            type: roleFallback.type,
-            title: roleFallback.title,
-            objective: `验证${roleFallback.title}`,
-            rationale: "自动补充已批准职位方向，确保宽结果可增加筛选维度",
+            type: fallback.type,
+            title: fallback.title,
+            objective: `验证${fallback.title}`,
+            rationale: "自动补充已批准方向，确保搜索假设覆盖完整人才市场",
             filters,
             limit: 20,
           },
@@ -715,6 +824,7 @@ export class DeepSeekProvider {
       version: 1,
       status: "draft",
       summary: String(result.data.summary ?? "岗位专属自适应搜索策略"),
+      strategyBrief,
       sourceNotes,
       targetShortlist: Math.min(
         15,
@@ -727,7 +837,12 @@ export class DeepSeekProvider {
       createdAt: now,
       updatedAt: now,
     });
-    if(campaignQualityIssues(data).length)throw new DeepSeekError("invalid_campaign");
+    const qualityIssues=campaignQualityIssues(data);
+    if(qualityIssues.length)
+      throw new DeepSeekError(
+        "invalid_campaign",
+        `invalid_campaign:${qualityIssues.join(",")}`,
+      );
     return { data, usage: result.usage, model: result.model };
   }
 

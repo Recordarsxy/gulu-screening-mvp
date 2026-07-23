@@ -12,6 +12,7 @@ describe("v1.3 adaptive campaign UI", () => {
       "confirmCampaign",
       "startCampaign",
       "getRunStrategy",
+      "getLatestCampaign",
     ])
       expect(source).toContain(text);
   });
@@ -34,6 +35,14 @@ describe("v1.3 adaptive campaign UI", () => {
       "暂停",
       "恢复",
       "紧急停止",
+      "客户真正要解决的问题",
+      "招聘判断",
+      "成功证据",
+      "人才画像",
+      "人才市场地图",
+      "自适应逻辑",
+      "谷露标签词典",
+      "不存在的标签自动改用关键词",
     ])
       expect(source).toContain(text);
     expect(source).toContain("campaign.steps.map");

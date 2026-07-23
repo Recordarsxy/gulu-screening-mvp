@@ -116,6 +116,26 @@ export type GuluSearchCampaign = {
   version: number;
   status: "draft" | "confirmed";
   summary: string;
+  strategyBrief?: {
+    businessObjective: string;
+    hiringThesis: string;
+    criticalOutcomes: string[];
+    successEvidence: string[];
+    talentArchetypes: Array<{
+      name: string;
+      whyFit: string;
+      likelyCompanies: string[];
+      likelyRoles: string[];
+      tradeoffs: string[];
+    }>;
+    marketMap: {
+      corePools: string[];
+      adjacentPools: string[];
+      transferLogic: string;
+    };
+    risks: string[];
+    adaptationLogic: string[];
+  };
   sourceNotes: string;
   targetShortlist: number;
   maxUniqueCandidates: number;
@@ -288,6 +308,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ sourceNotes }),
     }),
+  getLatestCampaign: (id: string) =>
+    json<GuluSearchCampaign>(`/api/jobs/${id}/gulu-campaigns/latest`),
   saveCampaign: (id: string, campaign: GuluSearchCampaign) =>
     json<GuluSearchCampaign>(`/api/jobs/${id}/gulu-campaigns/${campaign.id}`, {
       method: "PUT",

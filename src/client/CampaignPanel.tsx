@@ -205,7 +205,76 @@ export function CampaignPanel({
               </strong>
             </div>
           </div>
+          {campaign.strategyBrief && (
+            <section className="strategy-brief">
+              <div className="strategy-brief-lead">
+                <div>
+                  <small>客户真正要解决的问题</small>
+                  <p>{campaign.strategyBrief.businessObjective}</p>
+                </div>
+                <div>
+                  <small>招聘判断</small>
+                  <p>{campaign.strategyBrief.hiringThesis}</p>
+                </div>
+              </div>
+              <div className="strategy-brief-grid">
+                <div>
+                  <h3>关键业务结果</h3>
+                  {campaign.strategyBrief.criticalOutcomes.map((item) => (
+                    <p key={item}>• {item}</p>
+                  ))}
+                </div>
+                <div>
+                  <h3>成功证据</h3>
+                  {campaign.strategyBrief.successEvidence.map((item) => (
+                    <p key={item}>• {item}</p>
+                  ))}
+                </div>
+              </div>
+              <h3>人才画像</h3>
+              <div className="talent-archetypes">
+                {campaign.strategyBrief.talentArchetypes.map((archetype) => (
+                  <article key={archetype.name}>
+                    <b>{archetype.name}</b>
+                    <p>{archetype.whyFit}</p>
+                    {archetype.likelyCompanies.length > 0 && (
+                      <small>
+                        可能公司：{archetype.likelyCompanies.join("、")}
+                      </small>
+                    )}
+                    {archetype.likelyRoles.length > 0 && (
+                      <small>可能职位：{archetype.likelyRoles.join("、")}</small>
+                    )}
+                    {archetype.tradeoffs.length > 0 && (
+                      <small>取舍：{archetype.tradeoffs.join("；")}</small>
+                    )}
+                  </article>
+                ))}
+              </div>
+              <div className="strategy-brief-grid">
+                <div>
+                  <h3>人才市场地图</h3>
+                  <p>
+                    核心池：{campaign.strategyBrief.marketMap.corePools.join("、") || "待验证"}
+                  </p>
+                  <p>
+                    相邻池：{campaign.strategyBrief.marketMap.adjacentPools.join("、") || "待验证"}
+                  </p>
+                  <p>{campaign.strategyBrief.marketMap.transferLogic}</p>
+                </div>
+                <div>
+                  <h3>自适应逻辑</h3>
+                  {campaign.strategyBrief.adaptationLogic.map((item) => (
+                    <p key={item}>• {item}</p>
+                  ))}
+                </div>
+              </div>
+            </section>
+          )}
           <p className="campaign-summary">{campaign.summary}</p>
+          <p className="taxonomy-note">
+            谷露标签词典：城市、行业、职能会在预检中验证；不存在的标签自动改用关键词，并写入动态词典。
+          </p>
           <div className="campaign-steps">
             {campaign.steps.map((step, index) => (
               <article
@@ -270,7 +339,17 @@ export function CampaignPanel({
                     </label>
                   </div>
                 </header>
+                <p className="step-objective">
+                  <b>搜索假设：</b>
+                  {step.objective}
+                </p>
                 <p>{step.rationale}</p>
+                {step.expectedSignals.length > 0 && (
+                  <p className="step-signals">
+                    <b>预期简历证据：</b>
+                    {step.expectedSignals.join("；")}
+                  </p>
+                )}
                 <div className="step-filters">
                   {fields.map((field) => (
                     <label key={field}>

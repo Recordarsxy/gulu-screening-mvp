@@ -195,10 +195,22 @@ async function runCampaignTask({ task, campaign, steps, step }) {
   const tab = await ensureTab();
   if (task.phase === 'preflight') {
     for (const item of steps) {
-      const state = await restoreList(tab.id, item, 1, false);
+      let state;
+      try {
+        state = await restoreList(tab.id, item, 1, false);
+      } catch (error) {
+        const missing=unavailableFilter(error);
+        if(!missing)throw error;
+        await event(task.id,'filter_unavailable',{stepId:item.id,...missing},`preflight-filter-unavailable:${task.id}:${item.id}:${missing.field}:${missing.value}`);
+        continue;
+      }
       if (state.state === 'login_required' || state.state === 'captcha') {
         await event(task.id, 'needs_attention', { error: state.state }, `attention:${task.id}:${state.state}`);
         return;
+      }
+      for(const field of ['cities','industries','functions']){
+        const values=Array.isArray(item.filters?.[field])?item.filters[field]:[];
+        if(values.length)await event(task.id,'taxonomy_resolved',{stepId:item.id,field,values},`taxonomy-resolved:${task.id}:${item.id}:${field}:${values.join('|')}`);
       }
     }
     await event(task.id, 'preflight_completed', {}, `preflight:${task.id}`);

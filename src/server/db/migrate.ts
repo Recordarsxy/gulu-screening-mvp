@@ -236,4 +236,21 @@ export function migrate(db: DatabaseSync): void {
       db.prepare('INSERT INTO schema_migrations(version) VALUES (9)').run();db.exec('COMMIT');
     }catch(error){db.exec('ROLLBACK');throw error;}
   }
+  const version10=db.prepare('SELECT 1 ok FROM schema_migrations WHERE version=10').get();
+  if(!version10){
+    db.exec('BEGIN');
+    try{
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS gulu_taxonomy_values (
+          field TEXT NOT NULL,requested_value TEXT NOT NULL,canonical_value TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('valid','missing')),
+          source TEXT NOT NULL DEFAULT 'runtime',hit_count INTEGER NOT NULL DEFAULT 1,
+          first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY(field,requested_value)
+        );
+        CREATE INDEX IF NOT EXISTS idx_gulu_taxonomy_status ON gulu_taxonomy_values(field,status);
+      `);
+      db.prepare('INSERT INTO schema_migrations(version) VALUES (10)').run();db.exec('COMMIT');
+    }catch(error){db.exec('ROLLBACK');throw error;}
+  }
 }

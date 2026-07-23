@@ -74,6 +74,54 @@ export class GuluService {
     const row=this.db.prepare('SELECT campaign_json FROM gulu_search_campaigns WHERE id=? AND job_id=?').get(campaignId,jobId) as {campaign_json:string}|undefined;if(!row)throw new Error('campaign_not_found');return GuluSearchCampaignSchema.parse(JSON.parse(row.campaign_json));
   }
 
+  getLatestCampaign(jobId:string):GuluSearchCampaign|null {
+    const pack=getCurrentVersion(this.db,jobId);if(!pack)return null;
+    const row=this.db.prepare('SELECT campaign_json FROM gulu_search_campaigns WHERE job_id=? AND rule_version=? ORDER BY version DESC,created_at DESC LIMIT 1').get(jobId,pack.rule_version) as {campaign_json:string}|undefined;
+    return row?GuluSearchCampaignSchema.parse(JSON.parse(row.campaign_json)):null;
+  }
+
+  recordTaxonomyValue(field:string,requestedValue:string,status:'valid'|'missing',canonicalValue=requestedValue){
+    if(!['cities','industries','functions'].includes(field)||!requestedValue.trim())throw new Error('invalid_taxonomy_value');
+    const requested=requestedValue.trim(),canonical=(canonicalValue||requested).trim();
+    this.db.prepare(`INSERT INTO gulu_taxonomy_values(field,requested_value,canonical_value,status)
+      VALUES (?,?,?,?) ON CONFLICT(field,requested_value) DO UPDATE SET
+      canonical_value=excluded.canonical_value,status=excluded.status,
+      hit_count=gulu_taxonomy_values.hit_count+1,last_seen_at=CURRENT_TIMESTAMP`)
+      .run(field,requested,canonical,status);
+    return{field,requestedValue:requested,canonicalValue:canonical,status};
+  }
+
+  listTaxonomy(){
+    return this.db.prepare(`SELECT field,requested_value requestedValue,canonical_value canonicalValue,status,
+      source,hit_count hitCount,first_seen_at firstSeenAt,last_seen_at lastSeenAt
+      FROM gulu_taxonomy_values ORDER BY field,requested_value`).all();
+  }
+
+  applyTaxonomyDictionary(input:unknown):GuluSearchCampaign {
+    const campaign=GuluSearchCampaignSchema.parse(input);
+    const missing=this.db.prepare("SELECT field,requested_value requestedValue FROM gulu_taxonomy_values WHERE status='missing'").all() as Array<{field:'cities'|'industries'|'functions';requestedValue:string}>;
+    if(!missing.length)return campaign;
+    const steps=campaign.steps.map(step=>{
+      const filters=structuredClone(step.filters);
+      let sources=structuredClone(step.sources);
+      for(const field of ['cities','industries','functions'] as const){
+        const knownMissing=new Set(missing.filter(item=>item.field===field).map(item=>item.requestedValue));
+        const rejected=filters[field].filter(value=>knownMissing.has(value));
+        if(!rejected.length)continue;
+        const remaining=filters[field].filter(value=>!knownMissing.has(value));
+        filters[field]=remaining;
+        if(!remaining.length)filters.keywords=[...new Set([...filters.keywords,...rejected])];
+        sources=sources.map(source=>
+          source.field===field&&rejected.includes(source.value)
+            ? {...source,field:'keywords' as const,reason:'谷露标签词典未命中，改用关键词搜索'}
+            : source,
+        );
+      }
+      return GuluSearchStepSchema.parse({...step,filters,sources});
+    });
+    return GuluSearchCampaignSchema.parse({...campaign,steps});
+  }
+
   startCampaignTask(jobId:string,campaignId:string):GuluConnectorTask {
     const campaign=this.getCampaign(jobId,campaignId);if(campaign.status!=='confirmed')throw new Error('campaign_not_confirmed');const pack=getCurrentVersion(this.db,jobId);if(!pack||pack.approval.status!=='approved')throw new Error('rules_not_approved');if(pack.rule_version!==campaign.ruleVersion)throw new Error('campaign_outdated');
     const active=this.db.prepare("SELECT 1 ok FROM gulu_tasks WHERE job_id=? AND status IN ('queued','running','paused','needs_attention')").get(jobId);if(active)throw new Error('gulu_task_already_active');
@@ -104,6 +152,7 @@ export class GuluService {
   getTaskSteps(id:string):GuluStepProgress[]{const rows=this.db.prepare('SELECT step_id,status,page,candidate_cursor,read_count,unique_count,high_fit_count,last_error FROM gulu_task_steps WHERE task_id=? ORDER BY position').all(id) as Array<Record<string,unknown>>;return rows.map(row=>GuluStepProgressSchema.parse({stepId:row.step_id,status:row.status,page:row.page,candidateCursor:row.candidate_cursor,readCount:row.read_count,uniqueCount:row.unique_count,duplicateRate:Number(row.read_count)?1-Number(row.unique_count)/Number(row.read_count):0,highFitCount:row.high_fit_count,lastError:row.last_error}));}
   getTaskStrategy(id:string){const task=this.getTask(id);if(!task.campaignId)throw new Error('campaign_not_found');const campaign=this.getCampaign(task.jobId,task.campaignId);const rows=this.db.prepare('SELECT step_json FROM gulu_task_steps WHERE task_id=? ORDER BY position').all(id) as Array<{step_json:string}>;const steps=rows.map(row=>GuluSearchStepSchema.parse(JSON.parse(row.step_json)));const decisions=this.db.prepare('SELECT id,step_id stepId,action,metrics_json metrics,rationale,patch_json patch,created_at createdAt FROM gulu_strategy_decisions WHERE task_id=? ORDER BY created_at,rowid').all(id).map((row:any)=>({...row,metrics:JSON.parse(row.metrics),patch:JSON.parse(row.patch)}));return{task,campaign,steps,progress:task.stepProgress,decisions};}
   getCurrentCampaignStep(id:string):GuluSearchStep|null {const task=this.getTask(id);if(!task.campaignId||!task.currentStepId)return null;const row=this.db.prepare('SELECT step_json FROM gulu_task_steps WHERE task_id=? AND step_id=?').get(id,task.currentStepId) as {step_json:string}|undefined;return row?GuluSearchStepSchema.parse(JSON.parse(row.step_json)):null;}
+  getCampaignStep(id:string,stepId:string):GuluSearchStep|null {this.getTask(id);const row=this.db.prepare('SELECT step_json FROM gulu_task_steps WHERE task_id=? AND step_id=?').get(id,stepId) as {step_json:string}|undefined;return row?GuluSearchStepSchema.parse(JSON.parse(row.step_json)):null;}
   completePreflight(id:string):GuluConnectorTask {const task=this.getTask(id);if(!task.campaignId)throw new Error('campaign_not_found');this.db.prepare("UPDATE gulu_tasks SET status='running',phase='calibration',page=1,candidate_cursor=0,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(id);return this.getTask(id);}
   filterUnseen(id:string,input:string[]):string[]{this.getTask(id);const values=[...new Set(input.map(String).map(value=>value.trim()).filter(Boolean))];if(!values.length)return[];const placeholders=values.map(()=>'?').join(',');const rows=this.db.prepare(`SELECT dedupe_key FROM gulu_snapshots WHERE task_id=? AND dedupe_key IN (${placeholders})`).all(id,...values) as Array<{dedupe_key:string}>;const seen=new Set(rows.map(row=>row.dedupe_key));return values.filter(value=>!seen.has(value));}
   startStep(id:string,stepId:string):GuluConnectorTask {this.db.prepare("UPDATE gulu_task_steps SET status='calibrating',updated_at=CURRENT_TIMESTAMP WHERE task_id=? AND step_id=?").run(id,stepId);this.db.prepare("UPDATE gulu_tasks SET status='running',phase='calibration',updated_at=CURRENT_TIMESTAMP WHERE id=?").run(id);return this.getTask(id);}
@@ -114,8 +163,9 @@ export class GuluService {
   }
   recordFilterUnavailable(id:string,stepId:string,field:string,value:string){
     if(!['cities','industries','functions'].includes(field)||!value.trim())throw new Error('invalid_filter_unavailable');
-    const current=this.getCurrentCampaignStep(id);if(!current||!current.filters[field as 'cities'|'industries'|'functions'].includes(value.trim()))throw new Error('invalid_filter_unavailable');
+    const current=this.getCampaignStep(id,stepId);if(!current||!current.filters[field as 'cities'|'industries'|'functions'].includes(value.trim()))throw new Error('invalid_filter_unavailable');
     const normalizedValue=value.trim();
+    this.recordTaxonomyValue(field,normalizedValue,'missing');
     const fallbackFilters={...current.filters,[field]:current.filters[field as 'cities'|'industries'|'functions'].filter(item=>item!==normalizedValue),keywords:[normalizedValue]};
     const strategy=this.getTaskStrategy(id);
     const fallbackFingerprint=searchFingerprint(fallbackFilters);

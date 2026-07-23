@@ -53,6 +53,26 @@ describe("DeepSeek adaptive campaign behavior", () => {
         payload = JSON.parse(body.messages[1].content);
         return response({
           summary: "四方向验证海外销售人才池",
+          strategyBrief: {
+            businessObjective: "建立 Meshy 海外商业化增长能力",
+            hiringThesis: "寻找既能销售技术产品、又能独立开拓海外客户的人",
+            criticalOutcomes: ["从 0 到 1 建立海外客户管道"],
+            successEvidence: ["可量化的新客户收入和成交案例"],
+            talentArchetypes: [{
+              name: "技术型 SaaS 开拓者",
+              whyFit: "能向海外客户解释复杂产品价值并完成成交",
+              likelyCompanies: ["Meltwater", "PingCAP"],
+              likelyRoles: ["海外销售经理"],
+              tradeoffs: ["3D 行业经验可能不足"],
+            }],
+            marketMap: {
+              corePools: ["技术型 SaaS 海外销售"],
+              adjacentPools: ["游戏工具和 3D 软件商务拓展"],
+              transferLogic: "优先验证技术销售与独立获客能力，再验证行业迁移。",
+            },
+            risks: ["只做存量客户维护"],
+            adaptationLogic: ["结果大于 40 时增加第二维度", "结果为 0 时切换相邻画像"],
+          },
           targetShortlist: 8,
           steps: [
             {
@@ -83,6 +103,7 @@ describe("DeepSeek adaptive campaign behavior", () => {
       pack,
       "同事建议关注游戏工具公司",
       [{ steps: 2, unique: 10, highFit: 0 }],
+      "客户需要从 0 到 1 建立海外销售能力。",
     );
     expect(result.data).toMatchObject({
       jobId: "job-meshy",
@@ -99,6 +120,11 @@ describe("DeepSeek adaptive campaign behavior", () => {
         .size,
     ).toBe(4);
     expect(payload.history).toEqual([{ steps: 2, unique: 10, highFit: 0 }]);
+    expect(payload.original_jd).toBe("客户需要从 0 到 1 建立海外销售能力。");
+    expect(result.data.strategyBrief).toMatchObject({
+      businessObjective: "建立 Meshy 海外商业化增长能力",
+      talentArchetypes: [{name: "技术型 SaaS 开拓者"}],
+    });
     expect(JSON.stringify(payload)).not.toContain("候选人姓名");
   });
   it("scores retrieval fit separately from the hiring decision", async () => {
@@ -214,6 +240,30 @@ describe("DeepSeek adaptive campaign behavior", () => {
     pack.roles.synonyms=["Institutional Sales Director"];
     const result=await provider.generateGuluCampaign(pack);
     expect(result.data.steps.some((item)=>item.filters.roles.length>0)).toBe(true);
+  });
+  it("adds an approved company direction when the model returns only role steps",async()=>{
+    const provider=new DeepSeekProvider({apiKey:"test",fetcher:async()=>response({summary:"role only",targetShortlist:10,steps:[
+      step("role_cluster","exact",{roles:["Overseas Sales Manager"]}),
+      step("role_cluster","saas",{roles:["Overseas SaaS Sales"]}),
+      step("role_cluster","channel",{roles:["Overseas Channel Sales"]}),
+      step("role_cluster","bd",{roles:["Overseas Business Development"]}),
+    ]})});
+    const pack=makeDefaultJobPack("job-meshy","Overseas Sales Manager","JD");
+    pack.companies.target=["Meltwater","PingCAP"];
+    const result=await provider.generateGuluCampaign(pack);
+    expect(result.data.steps.some((item)=>item.filters.companies.length>0)).toBe(true);
+  });
+  it("repairs a model response with fewer than three steps from approved rules",async()=>{
+    const provider=new DeepSeekProvider({apiKey:"test",fetcher:async()=>response({summary:"short",targetShortlist:10,steps:[
+      step("role_cluster","one role",{roles:["Overseas Sales Manager"]}),
+      step("seed_company","one company",{companies:["Meltwater"]}),
+    ]})});
+    const pack=makeDefaultJobPack("job-short","Overseas Sales Manager","JD");
+    pack.companies.target=["Meltwater","PingCAP"];
+    pack.roles.synonyms=["Overseas SaaS Sales"];
+    pack.industries.target=["SaaS"];
+    const result=await provider.generateGuluCampaign(pack);
+    expect(result.data.steps.length).toBeGreaterThanOrEqual(4);
   });
   it("returns a constrained runtime decision with company-only additions", async () => {
     const provider = new DeepSeekProvider({

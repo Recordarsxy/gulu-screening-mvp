@@ -51,6 +51,7 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
     if (!gulu.authenticate(token)) return res.status(401).json({error:'connector_unauthorized'}); next();
   };
   app.post('/api/connector/gulu/heartbeat',connectorAuth,(req,res)=>{gulu.heartbeat(String(req.body?.status??'online'),req.body?.error?String(req.body.error):null,String(req.body?.extensionVersion??''));res.json({ok:true});});
+  app.get('/api/connectors/gulu/taxonomy',(_req,res)=>res.json({items:gulu.listTaxonomy()}));
   app.get('/api/connector/gulu/tasks/next',connectorAuth,(_req,res)=>{
     const row=db.prepare("SELECT id,job_id FROM gulu_tasks WHERE status IN ('queued','running') ORDER BY created_at LIMIT 1").get() as {id:string;job_id:string}|undefined;
     if (!row) return res.json({task:null}); const task=gulu.getTask(row.id);if(task.campaignId){const strategy=gulu.getTaskStrategy(row.id);return res.json({...strategy,step:gulu.getCurrentCampaignStep(row.id),pacingMs:{min:800,max:1500}})}const plan=gulu.getTaskPlan(row.id); res.json({task,plan,pacingMs:{min:800,max:1500}});
@@ -73,7 +74,8 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
     if(type==='failure') return res.json(gulu.recordFailure(taskId,String(req.body?.error??'connector_failure')));
     if(type==='preflight_completed')return res.json(gulu.completePreflight(taskId));
     if(type==='step_probed'){const stepId=String(req.body?.stepId??'');const resultCount=Number(req.body?.resultCount);if(!stepId||stepId!==gulu.getTask(taskId).currentStepId||!Number.isInteger(resultCount)||resultCount<0)return res.status(400).json({error:'invalid_probe'});return res.json(gulu.recordStepProbe(taskId,stepId,resultCount));}
-    if(type==='filter_unavailable'){const stepId=String(req.body?.stepId??''),field=String(req.body?.field??''),value=String(req.body?.value??'');if(!stepId||stepId!==gulu.getTask(taskId).currentStepId||!['cities','industries','functions'].includes(field)||!value.trim())return res.status(400).json({error:'invalid_filter_unavailable'});return res.json(gulu.recordFilterUnavailable(taskId,stepId,field,value));}
+    if(type==='filter_unavailable'){const stepId=String(req.body?.stepId??''),field=String(req.body?.field??''),value=String(req.body?.value??'');if(!stepId||!['cities','industries','functions'].includes(field)||!value.trim())return res.status(400).json({error:'invalid_filter_unavailable'});return res.json(gulu.recordFilterUnavailable(taskId,stepId,field,value));}
+    if(type==='taxonomy_resolved'){const field=String(req.body?.field??''),values:string[]=Array.isArray(req.body?.values)?req.body.values.map(String):[];if(!['cities','industries','functions'].includes(field)||!values.length)return res.status(400).json({error:'invalid_taxonomy_value'});values.forEach((value:string)=>gulu.recordTaxonomyValue(field,value,'valid'));return res.json({ok:true})}
     if(type==='step_started'){const stepId=String(req.body?.stepId??'');if(!stepId||stepId!==gulu.getTask(taskId).currentStepId)return res.status(400).json({error:'invalid_step'});return res.json(gulu.startStep(taskId,stepId));}
     if(type==='step_calibrated'){
       const stepId=String(req.body?.stepId??'');const task=gulu.getTask(taskId);const progress=task.stepProgress.find(item=>item.stepId===stepId);if(!progress)return res.status(400).json({error:'invalid_step'});
@@ -194,11 +196,13 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
   app.get('/api/jobs/:jobId/gulu-plan',(req,res)=>{const plan=gulu.getPlan(req.params.jobId);if(!plan)return res.status(404).json({error:'gulu_plan_not_found'});res.json(plan)});
   app.post('/api/jobs/:jobId/gulu-campaigns/generate',async(req,res,next)=>{try{
     const jobId=req.params.jobId;const pack=getCurrentVersion(db,jobId);if(!pack)return res.status(404).json({error:'job_not_found'});if(pack.approval.status!=='approved')return res.status(409).json({error:'rules_not_approved'});
+    const job=db.prepare('SELECT source_text FROM jobs WHERE id=?').get(jobId) as {source_text:string};
     const sourceNotes=sanitizeTextForCloud(String(req.body?.sourceNotes??'').trim());const history=db.prepare(`SELECT read_count uniqueCount,shortlisted_count highFit,completion_reason completionReason FROM gulu_tasks WHERE job_id=? AND campaign_id IS NOT NULL ORDER BY created_at DESC LIMIT 5`).all(jobId) as Array<Record<string,unknown>>;
-    const generated=await deepSeek.generateGuluCampaign(pack,sourceNotes,history);const versionRow=db.prepare('SELECT COALESCE(MAX(version),0)+1 version FROM gulu_search_campaigns WHERE job_id=?').get(jobId) as {version:number};res.json(gulu.saveCampaign({...generated.data,version:versionRow.version}));
+    const generated=await deepSeek.generateGuluCampaign(pack,sourceNotes,history,sanitizeTextForCloud(job.source_text));const versionRow=db.prepare('SELECT COALESCE(MAX(version),0)+1 version FROM gulu_search_campaigns WHERE job_id=?').get(jobId) as {version:number};res.json(gulu.saveCampaign(gulu.applyTaxonomyDictionary({...generated.data,version:versionRow.version})));
   }catch(error){next(error)}});
   app.put('/api/jobs/:jobId/gulu-campaigns/:campaignId',(req,res,next)=>{try{res.json(gulu.saveCampaign({...req.body,id:req.params.campaignId,jobId:req.params.jobId}))}catch(error){next(error)}});
   app.put('/api/jobs/:jobId/gulu-campaigns/:campaignId/confirm',(req,res,next)=>{try{res.json(gulu.confirmCampaign(req.params.jobId,req.params.campaignId,req.body))}catch(error){next(error)}});
+  app.get('/api/jobs/:jobId/gulu-campaigns/latest',(req,res)=>{const campaign=gulu.getLatestCampaign(req.params.jobId);if(!campaign)return res.status(404).json({error:'campaign_not_found'});res.json(campaign)});
   app.get('/api/jobs/:jobId/gulu-campaigns/:campaignId',(req,res,next)=>{try{res.json(gulu.getCampaign(req.params.jobId,req.params.campaignId))}catch(error){if(error instanceof Error&&error.message==='campaign_not_found')return res.status(404).json({error:error.message});next(error)}});
   app.get('/api/jobs/:jobId/runs/gulu',(req,res)=>res.json({items:gulu.listTasks(String(req.params.jobId))}));
   app.post('/api/jobs/:jobId/runs/gulu',(req,res,next)=>{try{
