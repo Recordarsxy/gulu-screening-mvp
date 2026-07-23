@@ -1101,7 +1101,7 @@ function JobListItem({
     </article>
   );
 }
-function RuleList({
+export function RuleList({
   title,
   value,
   onChange,
@@ -1110,13 +1110,16 @@ function RuleList({
   value: string[];
   onChange: (v: string[]) => void;
 }) {
+  const [draft,setDraft]=useState(value.join("\n"));
+  useEffect(()=>setDraft(value.join("\n")),[value]);
   return (
     <div className="rule-card">
       <h3>{title}</h3>
       <p>每行一条，可人工修改</p>
       <textarea
-        value={value.join("\n")}
-        onChange={(e) => onChange(split(e.target.value))}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => onChange(split(draft))}
       />
     </div>
   );
