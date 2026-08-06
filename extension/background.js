@@ -6,7 +6,7 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const pace = () => delay(800 + Math.floor(Math.random() * 701));
 
 async function stored() {
-  return chrome.storage.local.get(['connectorToken', 'guluTabId']);
+  return chrome.storage.local.get(['connectorToken', 'guluTabId', 'lastTaskId']);
 }
 
 async function api(path, init = {}) {
@@ -70,6 +70,10 @@ function candidateEventId(task, seed) {
   return `candidate:${task.id}:${task.currentRound}:${seed.guluId}`;
 }
 
+function resumeSoon() {
+  chrome.alarms.create('gulu-resume', { when: Date.now() + 1000 });
+}
+
 async function waitListSettled(tabId, expectedPage, { minimumDelay = 0, previousSignature = null } = {}) {
   const started = Date.now();
   let stableSignature = null;
@@ -77,7 +81,7 @@ async function waitListSettled(tabId, expectedPage, { minimumDelay = 0, previous
   for (let attempt = 0; attempt < 150; attempt += 1) {
     await delay(400);
     const state = await send(tabId, 'inspectListState');
-    const changed = previousSignature === null || state.signature !== previousSignature || expectedPage === 1;
+    const changed = state.empty || previousSignature === null || state.signature !== previousSignature;
     if (!state.loading && state.queryReady && state.resultReady && state.page === expectedPage && changed && Date.now() - started >= minimumDelay) {
       stableCount = state.signature === stableSignature ? stableCount + 1 : 1;
       stableSignature = state.signature;
@@ -99,9 +103,11 @@ async function restoreList(tabId, round, page, submit) {
   if (state.state === 'login_required' || state.state === 'captcha') return state;
   if (state.state !== 'list') throw new Error('unsupported_page');
 
-  await send(tabId, 'applyFilters', { filters: round.filters, submit });
+  await send(tabId, 'resetFilters');
+  const beforeQuery = await send(tabId, 'inspectListState');
+  await send(tabId, 'applyFilters', { filters: round.filters, submit, reset: false });
   if (!submit) return { state: 'list' };
-  await waitListSettled(tabId, 1, { minimumDelay: 2500 });
+  await waitListSettled(tabId, 1, { minimumDelay: 2500, previousSignature: beforeQuery.signature });
 
   for (let current = 1; current < page; current += 1) {
     const before = await send(tabId, 'inspectListState');
@@ -131,6 +137,8 @@ async function runOnce() {
 
     const { task, plan } = next;
     currentTask = task;
+    const saved = await stored();
+    const isNewTask = saved.lastTaskId !== task.id;
     if (task.status === 'queued') {
       await event(task.id, 'checkpoint', { checkpoint: { status: 'running' } }, `start:${task.id}`);
     }
@@ -143,12 +151,16 @@ async function runOnce() {
       await event(task.id, 'needs_attention', { error: state.state }, `attention:${task.id}:${state.state}`);
       return;
     }
+    if (isNewTask) await chrome.storage.local.set({ lastTaskId: task.id });
+    await event(task.id, 'round_started', { round: task.currentRound }, `round-start:${task.id}:${task.currentRound}`);
 
     if (task.mode === 'dry-run') {
+      await event(task.id, 'round_completed', { round: task.currentRound, empty: false }, `round-complete:${task.id}:${task.currentRound}`);
       if (task.currentRound === 'company') {
         await event(task.id, 'checkpoint', {
           checkpoint: { currentRound: 'role', page: 1, candidateCursor: 0 },
         }, `dry-round:${task.id}:role`);
+        resumeSoon();
       } else {
         await event(task.id, 'completed', {}, `complete:${task.id}`);
       }
@@ -203,15 +215,18 @@ async function runOnce() {
     }
 
     if (task.mode === 'pilot' && totalRead >= 5) {
+      await event(task.id, 'round_completed', { round: task.currentRound, empty: false }, `round-complete:${task.id}:${task.currentRound}`);
       await event(task.id, 'completed', {}, `complete:${task.id}`);
       return;
     }
 
     if ((task.mode !== 'pilot' && roundRead >= round.limit) || list.length === 0) {
+      await event(task.id, 'round_completed', { round: task.currentRound, empty: list.length === 0 }, `round-complete:${task.id}:${task.currentRound}`);
       if (task.currentRound === 'company') {
         await event(task.id, 'checkpoint', {
           checkpoint: { currentRound: 'role', page: 1, candidateCursor: 0 },
         }, `round:${task.id}:role`);
+        resumeSoon();
       } else if (task.mode === 'pilot') {
         await event(task.id, 'needs_attention', { error: 'pilot_insufficient_candidates' }, `attention:${task.id}:pilot-insufficient`);
       } else {
@@ -226,12 +241,16 @@ async function runOnce() {
         checkpoint: { page: task.page + 1, candidateCursor: 0 },
       }, `page:${task.id}:${task.currentRound}:${task.page + 1}`);
     } else if (task.currentRound === 'company') {
+      await event(task.id, 'round_completed', { round: task.currentRound, empty: false }, `round-complete:${task.id}:${task.currentRound}`);
       await event(task.id, 'checkpoint', {
         checkpoint: { currentRound: 'role', page: 1, candidateCursor: 0 },
       }, `round:${task.id}:role`);
+      resumeSoon();
     } else if (task.mode === 'pilot') {
+      await event(task.id, 'round_completed', { round: task.currentRound, empty: false }, `round-complete:${task.id}:${task.currentRound}`);
       await event(task.id, 'needs_attention', { error: 'pilot_insufficient_candidates' }, `attention:${task.id}:pilot-insufficient`);
     } else {
+      await event(task.id, 'round_completed', { round: task.currentRound, empty: false }, `round-complete:${task.id}:${task.currentRound}`);
       await event(task.id, 'completed', {}, `complete:${task.id}`);
     }
   } catch (error) {

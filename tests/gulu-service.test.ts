@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { migrate } from '../src/server/db/migrate.js';
-import { createDraft, approveVersion, makeDefaultJobPack } from '../src/server/services/job-pack.js';
+import { createDraft, approveVersion, makeDefaultJobPack, reviseDraft } from '../src/server/services/job-pack.js';
 import { GuluService } from '../src/server/services/gulu.js';
 
 const dbs: DatabaseSync[] = [];
@@ -45,8 +45,19 @@ describe('Gulu service', () => {
     service.recordCandidate(task.id,'event-2',{...snapshot,sourceRound:'role'});
     service.updateCheckpoint(task.id,{currentRound:'role',page:3,candidateCursor:7});
     const restored=service.getTask(task.id);
-    expect(restored).toMatchObject({readCount:2,dedupedCount:1,currentRound:'role',page:3,candidateCursor:7});
+    expect(restored).toMatchObject({readCount:2,dedupedCount:1,currentRound:'role',page:3,candidateCursor:7,companyReadCount:1,roleReadCount:1});
     expect(service.recordCandidate(task.id,'event-1',snapshot).duplicateEvent).toBe(true);
+  });
+
+  it('stores an immutable plan version and explicit round completion', () => {
+    const {db,service}=setup(); const saved=service.saveDraft(draft); const confirmed=service.confirmPlan('job-1',saved); const task=service.startTask('job-1');
+    expect(task).toMatchObject({planVersion:confirmed.version,companyStatus:'pending',roleStatus:'pending'});
+    expect(JSON.parse((db.prepare('SELECT plan_json FROM gulu_tasks WHERE id=?').get(task.id) as {plan_json:string}).plan_json).version).toBe(confirmed.version);
+    expect(service.startRound(task.id,'company').companyStatus).toBe('running');
+    expect(service.completeRound(task.id,'company',false).companyStatus).toBe('completed');
+    expect(service.startRound(task.id,'role').roleStatus).toBe('running');
+    expect(service.completeRound(task.id,'role',true).roleStatus).toBe('empty');
+    expect(service.getTaskPlan(task.id)).toMatchObject({version:confirmed.version,status:'confirmed'});
   });
 
   it('pauses after three consecutive connector failures', () => {
@@ -79,5 +90,23 @@ describe('Gulu service', () => {
     const {service}=setup();service.confirmPlan('job-1',draft);const task=service.startTask('job-1','dry-run');
     service.recordFailure(task.id,'temporary_adapter_error');
     expect(service.setStatus(task.id,'completed').lastError).toBeNull();
+  });
+
+  it('lists newest tasks first and links candidates to each task history',()=>{
+    const {db,service}=setup();service.confirmPlan('job-1',draft);
+    const first=service.startTask('job-1','dry-run');service.setStatus(first.id,'completed');
+    const second=service.startTask('job-1','dry-run');
+    db.prepare(`INSERT INTO candidates(id,job_id,dedupe_key,name,current_company,current_role,experiences_json) VALUES (?,?,?,?,?,?,?)`)
+      .run('candidate-1','job-1','G-1','Candidate One','Example','Manager','[]');
+    service.linkCandidate(second.id,'candidate-1');
+    service.linkCandidate(second.id,'candidate-1');
+    expect(service.listTasks('job-1').map((task)=>task.id)).toEqual([second.id,first.id]);
+    expect(db.prepare('SELECT count(*) count FROM gulu_task_candidates WHERE task_id=?').get(second.id)).toEqual({count:1});
+  });
+
+  it('refuses a task when the latest rule version is no longer approved',()=>{
+    const {db,service}=setup();service.confirmPlan('job-1',draft);
+    reviseDraft(db,'job-1',{summary:'Changed requirements'});
+    expect(()=>service.startTask('job-1','dry-run')).toThrow('rules_not_approved');
   });
 });

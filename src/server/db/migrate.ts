@@ -103,4 +103,75 @@ export function migrate(db: DatabaseSync): void {
     `);
     db.prepare('INSERT INTO schema_migrations(version) VALUES (3)').run();
   }
+  const version4 = db.prepare('SELECT 1 ok FROM schema_migrations WHERE version=4').get();
+  if (!version4) {
+    db.exec('BEGIN');
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS job_change_notes (
+          id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+          text TEXT NOT NULL, applied_rule_version INTEGER,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_job_change_notes_job ON job_change_notes(job_id,created_at);
+        CREATE TABLE IF NOT EXISTS gulu_search_plan_versions (
+          job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+          version INTEGER NOT NULL, rule_version INTEGER NOT NULL, status TEXT NOT NULL,
+          plan_json TEXT NOT NULL, confirmed_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY(job_id,version)
+        );
+      `);
+      const taskColumns = db.prepare('PRAGMA table_info(gulu_tasks)').all() as Array<{name:string}>;
+      const add = (name:string, sql:string) => { if (!taskColumns.some((column) => column.name === name)) db.exec(sql); };
+      add('plan_version', "ALTER TABLE gulu_tasks ADD COLUMN plan_version INTEGER NOT NULL DEFAULT 1");
+      add('plan_json', "ALTER TABLE gulu_tasks ADD COLUMN plan_json TEXT NOT NULL DEFAULT '{}'");
+      add('company_status', "ALTER TABLE gulu_tasks ADD COLUMN company_status TEXT NOT NULL DEFAULT 'pending'");
+      add('role_status', "ALTER TABLE gulu_tasks ADD COLUMN role_status TEXT NOT NULL DEFAULT 'pending'");
+      add('company_read_count', "ALTER TABLE gulu_tasks ADD COLUMN company_read_count INTEGER NOT NULL DEFAULT 0");
+      add('role_read_count', "ALTER TABLE gulu_tasks ADD COLUMN role_read_count INTEGER NOT NULL DEFAULT 0");
+      db.exec(`
+        INSERT OR IGNORE INTO gulu_search_plan_versions(job_id,version,rule_version,status,plan_json,confirmed_at)
+        SELECT job_id,1,rule_version,status,plan_json,confirmed_at FROM gulu_search_plans;
+        UPDATE gulu_tasks SET plan_json=COALESCE((SELECT plan_json FROM gulu_search_plans WHERE gulu_search_plans.job_id=gulu_tasks.job_id),'{}');
+      `);
+      db.prepare('INSERT INTO schema_migrations(version) VALUES (4)').run(); db.exec('COMMIT');
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+  }
+  const version5 = db.prepare('SELECT 1 ok FROM schema_migrations WHERE version=5').get();
+  if (!version5) {
+    db.exec('BEGIN');
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS gulu_task_candidates (
+          task_id TEXT NOT NULL REFERENCES gulu_tasks(id) ON DELETE CASCADE,
+          candidate_id TEXT NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY(task_id,candidate_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_gulu_task_candidates_candidate ON gulu_task_candidates(candidate_id);
+      `);
+      const snapshots = db.prepare(`SELECT s.task_id,s.dedupe_key,s.snapshot_json,t.job_id
+        FROM gulu_snapshots s JOIN gulu_tasks t ON t.id=s.task_id`).all() as Array<{task_id:string;dedupe_key:string;snapshot_json:string;job_id:string}>;
+      const findCandidate = db.prepare(`SELECT id FROM candidates WHERE job_id=? AND
+        (gulu_id=? OR detail_url=? OR dedupe_key=?) LIMIT 1`);
+      const linkCandidate = db.prepare('INSERT OR IGNORE INTO gulu_task_candidates(task_id,candidate_id) VALUES (?,?)');
+      for (const row of snapshots) {
+        let snapshot:Record<string,unknown>={};
+        try { snapshot=JSON.parse(row.snapshot_json) as Record<string,unknown>; } catch { /* retain unmatched historical snapshot */ }
+        const candidate=findCandidate.get(row.job_id,String(snapshot.guluId??''),String(snapshot.detailUrl??''),row.dedupe_key) as {id:string}|undefined;
+        if(candidate)linkCandidate.run(row.task_id,candidate.id);
+      }
+      db.prepare('INSERT INTO schema_migrations(version) VALUES (5)').run(); db.exec('COMMIT');
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+  }
+  const version6 = db.prepare('SELECT 1 ok FROM schema_migrations WHERE version=6').get();
+  if (!version6) {
+    db.exec('BEGIN');
+    try {
+      const jobColumns=db.prepare('PRAGMA table_info(jobs)').all() as Array<{name:string}>;
+      if(!jobColumns.some(column=>column.name==='archived_at'))db.exec('ALTER TABLE jobs ADD COLUMN archived_at TEXT');
+      db.prepare('INSERT INTO schema_migrations(version) VALUES (6)').run();db.exec('COMMIT');
+    } catch(error){db.exec('ROLLBACK');throw error;}
+  }
 }

@@ -31,11 +31,23 @@ describe('Chrome extension safety boundary', () => {
     expect(source).toContain("status: 'online', busy: true");
   });
 
+  it('records round completion and resumes the role round immediately',async()=>{
+    const source=await readFile(new URL('../extension/background.js',import.meta.url),'utf8');
+    expect(source).toContain("'round_started'");
+    expect(source).toContain("'round_completed'");
+    expect(source).toContain("chrome.alarms.create('gulu-resume'");
+    expect(source).toContain('when: Date.now() + 1000');
+    expect(source).toContain('resumeSoon();');
+  });
+
   it('waits for a committed query and three stable observations',async()=>{
     const source=await readFile(new URL('../extension/background.js',import.meta.url),'utf8');
     expect(source).toContain('state.queryReady');
     expect(source).toContain('stableCount >= 3');
     expect(source).toContain('minimumDelay: 2500');
+    expect(source).toContain("const beforeQuery = await send(tabId, 'inspectListState');");
+    expect(source).toContain('previousSignature: beforeQuery.signature');
+    expect(source).not.toContain('|| expectedPage === 1');
   });
 
   it('waits up to sixty seconds for candidates or an explicit empty state',async()=>{
@@ -53,6 +65,16 @@ describe('Chrome extension safety boundary', () => {
     expect(source.indexOf('chrome.tabs.reload(tabId).catch(() => {});')).toBeLessThan(source.indexOf("await send(tabId, 'applyFilters'"));
   });
 
+  it('recognizes a new task id and resets semantic filters before applying it',async()=>{
+    const background=await readFile(new URL('../extension/background.js',import.meta.url),'utf8');
+    const content=await readFile(new URL('../extension/content.js',import.meta.url),'utf8');
+    expect(background).toContain("'lastTaskId'");
+    expect(background).toContain('saved.lastTaskId !== task.id');
+    expect(background).toContain("chrome.storage.local.set({ lastTaskId: task.id })");
+    expect(background.indexOf("await send(tabId, 'resetFilters')")).toBeLessThan(background.indexOf("await send(tabId, 'applyFilters'"));
+    expect(content).toContain("message.operation === 'resetFilters'");
+  });
+
   it('uses Manifest V3 with no sensitive browser permissions', async () => {
     const manifest = JSON.parse(await readFile(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
     expect(manifest.manifest_version).toBe(3);
@@ -64,7 +86,7 @@ describe('Chrome extension safety boundary', () => {
 
   it('exposes only semantic read operations and strips forbidden fields', async () => {
     const adapter = await import('../extension/gulu-adapter.js');
-    expect(adapter.SEMANTIC_OPERATIONS).toEqual(['inspectState','inspectListState','applyFilters','readList','openDetail','readDetail','nextPage']);
+    expect(adapter.SEMANTIC_OPERATIONS).toEqual(['inspectState','inspectListState','resetFilters','applyFilters','readList','openDetail','readDetail','nextPage']);
     const safe=adapter.sanitizeSnapshot({guluId:'1',name:'甲',detailUrl:'http://121.43.105.7/crm#candidate/detail?id=1',company:'示例',role:'经理',phone:'13800000000',email:'a@b.com',notes:'秘密',sourceRound:'role',page:1,capturedAt:new Date().toISOString()});
     expect(safe).not.toHaveProperty('phone');expect(safe).not.toHaveProperty('email');expect(safe).not.toHaveProperty('notes');
     expect(Object.keys(safe).sort()).toEqual(expect.arrayContaining(['guluId','name','detailUrl','company','role']));

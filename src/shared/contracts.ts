@@ -67,13 +67,23 @@ export const GuluSearchRoundSchema = z.object({
 export const GuluSearchPlanSchema = z.object({
   jobId: z.string().min(1),
   ruleVersion: z.number().int().positive(),
+  version: z.number().int().positive().default(1),
+  sourceNotes: z.string().max(20_000).default(''),
   status: z.enum(['draft', 'confirmed']).default('draft'),
   rounds: z.tuple([GuluSearchRoundSchema, GuluSearchRoundSchema])
     .refine((rounds) => rounds[0].kind === 'company' && rounds[1].kind === 'role', 'company_then_role'),
   confirmedAt: z.string().nullable().default(null),
   rollout: z.object({dryRunCompleted:z.boolean().default(false),pilotCompleted:z.boolean().default(false)}).default({dryRunCompleted:false,pilotCompleted:false}),
+  createdAt: z.string().datetime().default(() => new Date().toISOString()),
+  updatedAt: z.string().datetime().default(() => new Date().toISOString()),
 });
 export type GuluSearchPlan = z.infer<typeof GuluSearchPlanSchema>;
+
+export const JobChangeNoteSchema = z.object({
+  id:z.string().min(1), jobId:z.string().min(1), text:z.string().trim().min(1).max(20_000),
+  createdAt:z.string(), appliedRuleVersion:z.number().int().positive().nullable().default(null),
+});
+export type JobChangeNote = z.infer<typeof JobChangeNoteSchema>;
 
 export const GuluExperienceSchema = z.object({
   company: z.string().default(''), role: z.string().default(''), period: z.string().default(''), summary: z.string().default(''),
@@ -89,14 +99,20 @@ export type GuluCandidateSnapshot = z.infer<typeof GuluCandidateSnapshotSchema>;
 
 export const GuluTaskStatusSchema = z.enum(['queued','running','paused','needs_attention','completed','stopped','failed']);
 export type GuluTaskStatus = z.infer<typeof GuluTaskStatusSchema>;
+export const GuluRoundStatusSchema = z.enum(['pending','running','completed','empty','failed']);
+export type GuluRoundStatus = z.infer<typeof GuluRoundStatusSchema>;
 export const GuluConnectorTaskSchema = z.object({
   id: z.string(), jobId: z.string(), ruleVersion: z.number().int().positive(), status: GuluTaskStatusSchema,
+  planVersion: z.number().int().positive().default(1),
   mode: z.enum(['dry-run','pilot','formal']).default('dry-run'),
   currentRound: z.enum(['company','role']).default('company'), page: z.number().int().positive().default(1),
   candidateCursor: z.number().int().nonnegative().default(0), readCount: z.number().int().nonnegative().default(0),
   roundReadCount: z.number().int().nonnegative().default(0),
   dedupedCount: z.number().int().nonnegative().default(0), analyzedCount: z.number().int().nonnegative().default(0),
   inputTokens: z.number().int().nonnegative().default(0), outputTokens: z.number().int().nonnegative().default(0),
+  companyStatus: GuluRoundStatusSchema.default('pending'), roleStatus: GuluRoundStatusSchema.default('pending'),
+  companyReadCount: z.number().int().nonnegative().default(0), roleReadCount: z.number().int().nonnegative().default(0),
   lastError: z.string().nullable().default(null),
+  createdAt: z.string().optional(), updatedAt: z.string().optional(),
 });
 export type GuluConnectorTask = z.infer<typeof GuluConnectorTaskSchema>;

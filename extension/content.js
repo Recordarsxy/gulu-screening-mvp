@@ -14,7 +14,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       let result;
       if (message.operation === 'inspectState') result = adapter.inspectState();
       if (message.operation === 'inspectListState') result = adapter.inspectListState();
-      if (message.operation === 'applyFilters') result = await adapter.applyFilters(args.filters ?? {}, { submit:Boolean(args.submit) });
+      if (message.operation === 'resetFilters') result = await adapter.resetFilters();
+      if (message.operation === 'applyFilters') result = await adapter.applyFilters(args.filters ?? {}, { submit:Boolean(args.submit), reset:args.reset !== false });
       if (message.operation === 'readList') result = adapter.readList({ page:Number(args.page) || 1 });
       if (message.operation === 'readDetail') result = adapter.readDetail(args.seed ?? {}, { sourceRound:args.sourceRound, page:Number(args.page) || 1 });
       if (message.operation === 'nextPage') result = adapter.nextPage();

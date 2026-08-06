@@ -12,16 +12,26 @@ type TaskRow = Record<string,string|number|null>;
 export class GuluService {
   constructor(private readonly db: DatabaseSync) {}
 
+  private writePlan(plan:GuluSearchPlan):GuluSearchPlan {
+    this.db.prepare(`INSERT INTO gulu_search_plans(job_id,rule_version,status,plan_json,confirmed_at) VALUES (?,?,?,?,?)
+      ON CONFLICT(job_id) DO UPDATE SET rule_version=excluded.rule_version,status=excluded.status,plan_json=excluded.plan_json,confirmed_at=excluded.confirmed_at,updated_at=CURRENT_TIMESTAMP`)
+      .run(plan.jobId,plan.ruleVersion,plan.status,JSON.stringify(plan),plan.confirmedAt);
+    this.db.prepare(`INSERT INTO gulu_search_plan_versions(job_id,version,rule_version,status,plan_json,confirmed_at) VALUES (?,?,?,?,?,?)
+      ON CONFLICT(job_id,version) DO UPDATE SET rule_version=excluded.rule_version,status=excluded.status,plan_json=excluded.plan_json,confirmed_at=excluded.confirmed_at,updated_at=CURRENT_TIMESTAMP`)
+      .run(plan.jobId,plan.version,plan.ruleVersion,plan.status,JSON.stringify(plan),plan.confirmedAt);
+    return plan;
+  }
+
   saveDraft(input: unknown): GuluSearchPlan {
     const plan=GuluSearchPlanSchema.parse(input);
     const current=getCurrentVersion(this.db,plan.jobId);
     if (!current) throw new Error('job_not_found');
     if (current.rule_version!==plan.ruleVersion) throw new Error('rule_version_unavailable');
-    const draft={...plan,status:'draft' as const,confirmedAt:null,rollout:{dryRunCompleted:false,pilotCompleted:false}};
-    this.db.prepare(`INSERT INTO gulu_search_plans(job_id,rule_version,status,plan_json,confirmed_at) VALUES (?,?,?,?,NULL)
-      ON CONFLICT(job_id) DO UPDATE SET rule_version=excluded.rule_version,status='draft',plan_json=excluded.plan_json,confirmed_at=NULL,updated_at=CURRENT_TIMESTAMP`)
-      .run(plan.jobId,plan.ruleVersion,'draft',JSON.stringify(draft));
-    return draft;
+    const previous=this.getPlan(plan.jobId); const now=new Date().toISOString();
+    const changed=previous?.status==='confirmed' && JSON.stringify({rounds:previous.rounds,sourceNotes:previous.sourceNotes})!==JSON.stringify({rounds:plan.rounds,sourceNotes:plan.sourceNotes});
+    const version=previous ? (changed ? previous.version+1 : Math.max(previous.version,plan.version)) : plan.version;
+    const draft=GuluSearchPlanSchema.parse({...plan,version,status:'draft',confirmedAt:null,rollout:{dryRunCompleted:false,pilotCompleted:false},createdAt:version===previous?.version?previous.createdAt:now,updatedAt:now});
+    return this.writePlan(draft);
   }
 
   confirmPlan(jobId:string,input:unknown): GuluSearchPlan {
@@ -30,11 +40,9 @@ export class GuluService {
     if (!pack) throw new Error('job_not_found');
     if (pack.approval.status!=='approved') throw new Error('rules_not_approved');
     if (pack.rule_version!==parsed.ruleVersion) throw new Error('rule_version_unavailable');
-    const plan={...parsed,status:'confirmed' as const,confirmedAt:new Date().toISOString(),rollout:{dryRunCompleted:false,pilotCompleted:false}};
-    this.db.prepare(`INSERT INTO gulu_search_plans(job_id,rule_version,status,plan_json,confirmed_at) VALUES (?,?,?,?,?)
-      ON CONFLICT(job_id) DO UPDATE SET rule_version=excluded.rule_version,status=excluded.status,plan_json=excluded.plan_json,confirmed_at=excluded.confirmed_at,updated_at=CURRENT_TIMESTAMP`)
-      .run(jobId,plan.ruleVersion,'confirmed',JSON.stringify(plan),plan.confirmedAt);
-    return plan;
+    const now=new Date().toISOString();
+    const plan=GuluSearchPlanSchema.parse({...parsed,status:'confirmed',confirmedAt:now,rollout:{dryRunCompleted:false,pilotCompleted:false},updatedAt:now});
+    return this.writePlan(plan);
   }
 
   getPlan(jobId:string):GuluSearchPlan|null {
@@ -44,18 +52,51 @@ export class GuluService {
 
   startTask(jobId:string,mode:'dry-run'|'pilot'|'formal'='dry-run'):GuluConnectorTask {
     const plan=this.getPlan(jobId); if (!plan || plan.status!=='confirmed') throw new Error('gulu_plan_not_confirmed');
+    const pack=getCurrentVersion(this.db,jobId);if(!pack)throw new Error('job_not_found');
+    if(pack.approval.status!=='approved')throw new Error('rules_not_approved');
+    if(pack.rule_version!==plan.ruleVersion)throw new Error('gulu_plan_outdated');
     if(mode==='pilot'&&!plan.rollout.dryRunCompleted)throw new Error('gulu_dry_run_required');
     if(mode==='formal'&&!plan.rollout.pilotCompleted)throw new Error('gulu_pilot_required');
     const active=this.db.prepare("SELECT 1 ok FROM gulu_tasks WHERE job_id=? AND status IN ('queued','running','paused','needs_attention')").get(jobId);
     if(active)throw new Error('gulu_task_already_active');
-    const id=randomUUID(); this.db.prepare('INSERT INTO gulu_tasks(id,job_id,rule_version,status,mode) VALUES (?,?,?,?,?)').run(id,jobId,plan.ruleVersion,'queued',mode);
+    const id=randomUUID(); this.db.prepare('INSERT INTO gulu_tasks(id,job_id,rule_version,plan_version,plan_json,status,mode) VALUES (?,?,?,?,?,?,?)').run(id,jobId,plan.ruleVersion,plan.version,JSON.stringify(plan),'queued',mode);
     return this.getTask(id);
   }
 
   getTask(id:string):GuluConnectorTask {
     const row=this.db.prepare('SELECT * FROM gulu_tasks WHERE id=?').get(id) as TaskRow|undefined;
     if (!row) throw new Error('run_not_found');
-    return GuluConnectorTaskSchema.parse({id:row.id,jobId:row.job_id,ruleVersion:row.rule_version,status:row.status,mode:row.mode,currentRound:row.current_round,page:row.page,candidateCursor:row.candidate_cursor,readCount:row.read_count,roundReadCount:row.round_read_count,dedupedCount:row.deduped_count,analyzedCount:row.analyzed_count,inputTokens:row.input_tokens,outputTokens:row.output_tokens,lastError:row.last_error});
+    return GuluConnectorTaskSchema.parse({id:row.id,jobId:row.job_id,ruleVersion:row.rule_version,planVersion:row.plan_version,status:row.status,mode:row.mode,currentRound:row.current_round,page:row.page,candidateCursor:row.candidate_cursor,readCount:row.read_count,roundReadCount:row.round_read_count,dedupedCount:row.deduped_count,analyzedCount:row.analyzed_count,inputTokens:row.input_tokens,outputTokens:row.output_tokens,companyStatus:row.company_status,roleStatus:row.role_status,companyReadCount:row.company_read_count,roleReadCount:row.role_read_count,lastError:row.last_error,createdAt:row.created_at,updatedAt:row.updated_at});
+  }
+
+  listTasks(jobId:string):GuluConnectorTask[] {
+    const rows=this.db.prepare('SELECT id FROM gulu_tasks WHERE job_id=? ORDER BY created_at DESC,rowid DESC').all(jobId) as Array<{id:string}>;
+    return rows.map((row)=>this.getTask(row.id));
+  }
+
+  linkCandidate(taskId:string,candidateId:string):void {
+    const task=this.getTask(taskId);
+    const candidate=this.db.prepare('SELECT job_id FROM candidates WHERE id=?').get(candidateId) as {job_id:string}|undefined;
+    if(!candidate)throw new Error('candidate_not_found');
+    if(candidate.job_id!==task.jobId)throw new Error('candidate_job_mismatch');
+    this.db.prepare('INSERT OR IGNORE INTO gulu_task_candidates(task_id,candidate_id) VALUES (?,?)').run(taskId,candidateId);
+  }
+
+  getTaskPlan(id:string):GuluSearchPlan {
+    const row=this.db.prepare('SELECT plan_json FROM gulu_tasks WHERE id=?').get(id) as {plan_json:string}|undefined;if(!row)throw new Error('run_not_found');
+    return GuluSearchPlanSchema.parse(JSON.parse(row.plan_json));
+  }
+
+  startRound(id:string,round:'company'|'role'):GuluConnectorTask {
+    this.getTask(id); const column=round==='company'?'company_status':'role_status';
+    this.db.prepare(`UPDATE gulu_tasks SET ${column}='running',updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(id);
+    return this.getTask(id);
+  }
+
+  completeRound(id:string,round:'company'|'role',empty=false):GuluConnectorTask {
+    this.getTask(id); const column=round==='company'?'company_status':'role_status';
+    this.db.prepare(`UPDATE gulu_tasks SET ${column}=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(empty?'empty':'completed',id);
+    return this.getTask(id);
   }
 
   updateCheckpoint(id:string,patch:{currentRound?:'company'|'role';page?:number;candidateCursor?:number;status?:GuluConnectorTask['status']}):GuluConnectorTask {
@@ -72,8 +113,11 @@ export class GuluService {
     if (Number(event.changes)===0) { const task=this.getTask(id); return {...task,task,duplicateEvent:true}; }
     const dedupeKey=snapshot.guluId||snapshot.detailUrl;const contentHash=sha256(JSON.stringify({company:snapshot.company,role:snapshot.role,city:snapshot.city,industry:snapshot.industry,function:snapshot.function,salary:snapshot.salary,experiences:snapshot.experiences,education:snapshot.education,tags:snapshot.tags}));
     const inserted=this.db.prepare('INSERT OR IGNORE INTO gulu_snapshots(task_id,dedupe_key,content_hash,snapshot_json,first_round) VALUES (?,?,?,?,?)').run(id,dedupeKey,contentHash,JSON.stringify(snapshot),snapshot.sourceRound);
-    this.db.prepare(`UPDATE gulu_tasks SET read_count=read_count+1,round_read_count=round_read_count+1,deduped_count=deduped_count+?,consecutive_failures=0,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-      .run(Number(inserted.changes),id);
+    this.db.prepare(`UPDATE gulu_tasks SET read_count=read_count+1,round_read_count=round_read_count+1,deduped_count=deduped_count+?,
+      company_read_count=company_read_count+CASE WHEN ?='company' THEN 1 ELSE 0 END,
+      role_read_count=role_read_count+CASE WHEN ?='role' THEN 1 ELSE 0 END,
+      consecutive_failures=0,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+      .run(Number(inserted.changes),snapshot.sourceRound,snapshot.sourceRound,id);
     const task=this.getTask(id); return {...task,task,duplicateEvent:false};
   }
 
@@ -93,7 +137,7 @@ export class GuluService {
     this.db.prepare('UPDATE gulu_tasks SET status=?,last_error=CASE WHEN ?=? THEN NULL ELSE last_error END,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(status,status,'completed',id);
     if(status==='completed'){
       const row=this.db.prepare('SELECT job_id,mode FROM gulu_tasks WHERE id=?').get(id) as {job_id:string;mode:string};const plan=this.getPlan(row.job_id);
-      if(plan){if(row.mode==='dry-run')plan.rollout.dryRunCompleted=true;if(row.mode==='pilot')plan.rollout.pilotCompleted=true;this.db.prepare('UPDATE gulu_search_plans SET plan_json=?,updated_at=CURRENT_TIMESTAMP WHERE job_id=?').run(JSON.stringify(plan),row.job_id);}
+      if(plan){if(row.mode==='dry-run')plan.rollout.dryRunCompleted=true;if(row.mode==='pilot')plan.rollout.pilotCompleted=true;plan.updatedAt=new Date().toISOString();this.writePlan(plan);}
     }
     return this.getTask(id);
   }

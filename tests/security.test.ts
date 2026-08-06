@@ -13,6 +13,13 @@ describe('Windows delivery', () => {
     expect(launcher).not.toContain('0.0.0.0');
     const start = await readFile(new URL('../scripts/start.mjs', import.meta.url), 'utf8');
     expect(start).toContain('--env-file-if-exists=.env');
+    expect(launcher).toContain('if not exist node_modules\\.bin\\vite.cmd');
+    expect(start).toContain("spawn('explorer.exe', [localUrl]");
+    expect(start).toContain('if (await isHealthy())');
+    expect(start).toContain("const expectedVersion = '1.2.0'");
+    expect(start).toContain('payload.version === expectedVersion');
+    expect(start).toContain('请先关闭旧版本服务窗口');
+    expect(start).toContain('openLocalUrl();');
   });
 
   it('is parsed by Windows cmd without truncating commands', async () => {
@@ -22,5 +29,12 @@ describe('Windows delivery', () => {
     const result=spawnSync('cmd.exe',['/d','/c',fileURLToPath(launcherUrl),'--check'],{cwd:fileURLToPath(new URL('..',import.meta.url)),encoding:'utf8',timeout:15000,input:'\n'});
     expect(result.status,`${result.stdout}\n${result.stderr}`).toBe(0);
     expect(`${result.stdout}${result.stderr}`).not.toMatch(/not recognized|版本过低/i);
+  });
+
+  it('uses v1.2.0 consistently across the product and extension',async()=>{
+    expect(JSON.parse(await readFile(new URL('../package.json',import.meta.url),'utf8')).version).toBe('1.2.0');
+    expect(JSON.parse(await readFile(new URL('../extension/manifest.json',import.meta.url),'utf8')).version).toBe('1.2.0');
+    expect(await readFile(new URL('../src/server/app.ts',import.meta.url),'utf8')).toContain("version: '1.2.0'");
+    expect(await readFile(new URL('../src/client/App.tsx',import.meta.url),'utf8')).toContain('GULU SCREENING v1.2.0');
   });
 });
