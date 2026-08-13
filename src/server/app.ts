@@ -8,7 +8,6 @@ import multer from 'multer';
 import { approveVersion, createDraft, getCurrentVersion, makeDefaultJobPack, normalizeAiDraftRules, restoreDraft, reviseDraft } from './services/job-pack.js';
 import { generateHumanGuide, parseSource } from './services/documents.js';
 import { ScreeningEngine } from './services/screening.js';
-import { demoCompanyRound, demoRoleRound } from './demo/candidates.js';
 import { buildCsv, buildWorkbook, deleteJobData } from './services/exports.js';
 import { DeepSeekProvider } from './services/deepseek.js';
 import { sanitizeCandidate, sanitizeTextForCloud } from './services/redaction.js';
@@ -18,12 +17,25 @@ import { archiveJob, restoreJob } from './services/job-archive.js';
 import { resetJobSection, type JobResetSection } from './services/job-reset.js';
 import { safeGuluCandidateUrl } from '../shared/gulu-link.js';
 import { LiepinJobPackStore, toGuluJobPack } from './services/liepin-job-packs.js';
+import { getDemoStatus } from './demo/bootstrap.js';
+import type { AppMode } from './modes.js';
+import { DemoConnector } from './demo/connector.js';
 
-type AppDeps = { db: DatabaseSync; dataRoot: string; deepSeek?: DeepSeekProvider; jobPackTimeoutMs?:number; liepinJobsRoot?:string };
+type AppDeps = {
+  db: DatabaseSync;
+  dataRoot: string;
+  deepSeek?: DeepSeekProvider;
+  jobPackTimeoutMs?: number;
+  liepinJobsRoot?: string;
+  mode?: AppMode;
+  resetDemo?: () => void;
+  dynamicDeepSeek?: DeepSeekProvider;
+};
 
-export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobPackTimeoutMs=Number(process.env.JOB_PACK_TIMEOUT_MS||60_000),liepinJobsRoot=process.env.LIEPIN_JOBS_DIR||join(homedir(),'Liepin-Codex','jobs') }: AppDeps) {
+export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobPackTimeoutMs=Number(process.env.JOB_PACK_TIMEOUT_MS||60_000),liepinJobsRoot=process.env.LIEPIN_JOBS_DIR||join(homedir(),'Liepin-Codex','jobs'),mode='live',resetDemo,dynamicDeepSeek }: AppDeps) {
   const app = express(); const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
   const engine = new ScreeningEngine(db, deepSeek);
+  const demoConnector = new DemoConnector(engine);
   const gulu = new GuluService(db);
   const jobChanges = new JobChangeService(db);
   const liepinJobPacks = new LiepinJobPackStore(liepinJobsRoot);
@@ -43,7 +55,53 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
   };
   app.disable('x-powered-by'); app.use(express.json({ limit: '2mb' }));
 
-  app.get('/api/health', (_req, res) => res.json({ ok: true, host: '127.0.0.1', mode: 'local-only', version: '1.3.0' }));
+  app.get('/api/health', (_req, res) => res.json({ ok: true, host: '127.0.0.1', mode, version: '1.4.0' }));
+  app.get('/api/demo/status', (_req, res) => {
+    if (mode !== 'demo') return res.status(404).json({ error: 'demo_api_not_available' });
+    res.json(getDemoStatus(db));
+  });
+  app.post('/api/demo/reset', (req, res, next) => {
+    if (mode !== 'demo') return res.status(403).json({ error: 'demo_reset_forbidden' });
+    if (req.body?.confirmation !== 'RESET_DEMO') return res.status(400).json({ error: 'demo_reset_confirmation_required' });
+    try { resetDemo?.(); res.json(getDemoStatus(db)); } catch (error) { next(error); }
+  });
+  app.get('/api/live/preflight', (_req, res) => {
+    if (mode !== 'live') return res.status(404).json({ error: 'live_api_not_available' });
+    const connector = gulu.getStatus();
+    res.json({
+      extensionOnline: connector.extensionOnline,
+      guluStatus: connector.guluStatus,
+      paired: connector.paired,
+      deepSeekConfigured: deepSeek.isConfigured(),
+    });
+  });
+  app.post('/api/demo/dynamic/campaign', async (req, res, next) => {
+    if (mode !== 'demo') return res.status(404).json({ error: 'demo_api_not_available' });
+    if (req.body?.confirmation !== 'DYNAMIC_GENERATE') return res.status(400).json({ error: 'dynamic_generation_confirmation_required' });
+    try {
+      const jobId = String(req.body?.jobId ?? '');
+      const pack = getCurrentVersion(db, jobId);
+      if (!pack) return res.status(404).json({ error: 'job_not_found' });
+      const versionRow = db.prepare('SELECT COALESCE(MAX(version),0)+1 version FROM gulu_search_campaigns WHERE job_id=?').get(jobId) as { version: number };
+      let generated; let fallback = false; let warning: string | undefined;
+      try {
+        if (!dynamicDeepSeek?.isConfigured()) throw new Error('dynamic_ai_not_configured');
+        generated = await dynamicDeepSeek.generateGuluCampaign(pack, String(req.body?.sourceNotes ?? ''));
+      } catch (error) {
+        fallback = true;
+        warning = error instanceof Error ? error.message : 'dynamic_ai_failed';
+        generated = await deepSeek.generateGuluCampaign(pack, String(req.body?.sourceNotes ?? ''));
+      }
+      const campaign = gulu.saveCampaign({ ...generated.data, version: versionRow.version });
+      res.json({ campaign, fallback, warning });
+    } catch (error) { next(error); }
+  });
+  app.use('/api', (req, res, next) => {
+    if (mode === 'demo' && req.method === 'POST' && (req.path === '/jobs' || req.path === '/jobs/import')) {
+      return res.status(403).json({ error: 'fixed_demo_job_only' });
+    }
+    next();
+  });
 
   app.get('/api/integrations/liepin/job-packs',async(_req,res,next)=>{try{
     res.json(await liepinJobPacks.list());
@@ -266,7 +324,7 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
 
   app.post('/api/jobs/:jobId/runs/demo', async (req, res, next) => {
     try {
-      res.status(201).json(engine.startRun(req.params.jobId, [demoCompanyRound, demoRoleRound]));
+      res.status(201).json(demoConnector.start(req.params.jobId));
     } catch (error) {
       if (error instanceof Error && error.message === 'rules_not_approved') return res.status(409).json({ error: error.message });
       next(error);
@@ -275,9 +333,8 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
   app.get('/api/runs/:runId', (req, res, next) => { try { const task=db.prepare('SELECT 1 FROM gulu_tasks WHERE id=?').get(req.params.runId);res.json(task?gulu.getTask(String(req.params.runId)):engine.getRun(String(req.params.runId))); } catch (error) { next(error); } });
   app.post('/api/runs/:runId/process', async (req, res, next) => {
     try {
-      const limit = Math.max(1, Math.min(50, Number(req.body?.limit) || 5)); let run = engine.getRun(req.params.runId);
-      for (let i=0; i<limit && run.status==='running'; i+=1) run = await engine.processNext(run.id);
-      res.json(run);
+      const limit = Math.max(1, Math.min(50, Number(req.body?.limit) || 5));
+      res.json(await demoConnector.process(req.params.runId, limit));
     } catch (error) { next(error); }
   });
   app.post('/api/runs/:runId/pause', (req, res, next) => { try { const task=db.prepare('SELECT 1 FROM gulu_tasks WHERE id=?').get(req.params.runId);if(task)taskControllers.get(String(req.params.runId))?.abort();res.json(task?gulu.setStatus(req.params.runId,'paused'):engine.pauseRun(req.params.runId)); } catch (error) { next(error); } });
@@ -341,10 +398,10 @@ export function createApp({ db, dataRoot, deepSeek = new DeepSeekProvider(),jobP
   });
 
   app.get('/api/jobs/:jobId/export.csv', async (req, res, next) => {
-    try { res.setHeader('content-disposition', 'attachment; filename="screening-results.csv"'); res.type('text/csv').send(await buildCsv(db, req.params.jobId)); } catch (error) { next(error); }
+    try { res.setHeader('content-disposition', `attachment; filename="${mode === 'demo' ? 'fictional-demo-' : ''}screening-results.csv"`); res.type('text/csv').send(await buildCsv(db, req.params.jobId, { fictionalDemo: mode === 'demo' })); } catch (error) { next(error); }
   });
   app.get('/api/jobs/:jobId/export.xlsx', async (req, res, next) => {
-    try { res.setHeader('content-disposition', 'attachment; filename="screening-results.xlsx"'); res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').send(await buildWorkbook(db, req.params.jobId)); } catch (error) { next(error); }
+    try { res.setHeader('content-disposition', `attachment; filename="${mode === 'demo' ? 'fictional-demo-' : ''}screening-results.xlsx"`); res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').send(await buildWorkbook(db, req.params.jobId, { fictionalDemo: mode === 'demo' })); } catch (error) { next(error); }
   });
 
   app.post('/api/settings/test-deepseek', async (req, res) => {

@@ -6,6 +6,11 @@ export type JobSummary = {
   archived_at: string | null;
   status: "draft" | "approved" | null;
 };
+export type AppMode = "demo" | "live";
+
+export function currentAppMode(pathname = window.location.pathname): AppMode {
+  return pathname === "/demo" || pathname.startsWith("/demo/") ? "demo" : "live";
+}
 export type JobPack = any;
 export type LiepinJobPackSummary = {
   id: string;
@@ -257,14 +262,40 @@ export type GuluTaxonomyValue = {
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,
-    headers: { "content-type": "application/json", ...init?.headers },
+    headers: { "content-type": "application/json", "X-App-Mode": currentAppMode(), ...init?.headers },
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok)
     throw new Error(data.error || `请求失败 ${response.status}`);
   return data;
 }
+
+async function download(url: string, fallbackName: string): Promise<void> {
+  const response = await fetch(url, { headers: { "X-App-Mode": currentAppMode() } });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || `下载失败 ${response.status}`);
+  }
+  const blob = await response.blob();
+  const match = response.headers.get("content-disposition")?.match(/filename="?([^";]+)"?/i);
+  const anchor = document.createElement("a");
+  anchor.href = URL.createObjectURL(blob);
+  anchor.download = match?.[1] || fallbackName;
+  anchor.click();
+  URL.revokeObjectURL(anchor.href);
+}
 export const api = {
+  download,
+  demoStatus: () => json<{ initialized: boolean; jobId: string; fictional: true }>("/api/demo/status"),
+  resetDemo: () => json<{ initialized: boolean; jobId: string; fictional: true }>("/api/demo/reset", {
+    method: "POST",
+    body: JSON.stringify({ confirmation: "RESET_DEMO" }),
+  }),
+  dynamicDemoCampaign: (jobId: string) => json<{ campaign: GuluSearchCampaign; fallback: boolean; warning?: string }>("/api/demo/dynamic/campaign", {
+    method: "POST",
+    body: JSON.stringify({ jobId, confirmation: "DYNAMIC_GENERATE" }),
+  }),
+  livePreflight: () => json<{ extensionOnline: boolean; guluStatus: string; paired: boolean; deepSeekConfigured: boolean }>("/api/live/preflight"),
   listLiepinJobPacks: () =>
     json<{
       configured: boolean;
@@ -293,6 +324,7 @@ export const api = {
     const response = await fetch("/api/jobs/import", {
       method: "POST",
       body: form,
+      headers: { "X-App-Mode": currentAppMode() },
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error);

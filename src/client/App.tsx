@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   api,
+  type AppMode,
   type ConnectorStatus,
   type GuluPlan,
   type GuluSearchCampaign,
@@ -39,7 +40,7 @@ const resetMessages: Record<ResetSection, string> = {
     "将清空候选人、DeepSeek 判断和人工复核。规则与运行历史会保留。",
 };
 
-export function App() {
+export function App({ mode = "live" }: { mode?: AppMode }) {
   const [view, setView] = useState<View>("jobs"),
     [jobs, setJobs] = useState<JobSummary[]>([]),
     [archivedJobs, setArchivedJobs] = useState<JobSummary[]>([]),
@@ -76,6 +77,7 @@ export function App() {
   const [verificationResults, setVerificationResults] = useState<ResultItem[]>([]);
   const [taskHistory, setTaskHistory] = useState<GuluTask[]>([]),
     [confirmFresh, setConfirmFresh] = useState(false),
+    [demoResetConfirm, setDemoResetConfirm] = useState(false),
     [archiveTarget, setArchiveTarget] = useState<JobSummary | null>(null),
     [resetTarget, setResetTarget] = useState<ResetSection | null>(null),
     [resultsRunId, setResultsRunId] = useState("");
@@ -131,6 +133,7 @@ export function App() {
       });
   useEffect(() => {
     refreshJobs();
+    if (mode === "demo") return;
     refreshConnector();
     refreshTaxonomy();
     refreshLiepinPacks();
@@ -139,7 +142,7 @@ export function App() {
       refreshTaxonomy();
     }, 3000);
     return () => clearInterval(timer);
-  }, []);
+  }, [mode]);
   useEffect(() => {
     if (!task || terminalTask(task.status)) return;
     const timer = setInterval(
@@ -594,7 +597,7 @@ export function App() {
       <main>
         <header>
           <div>
-            <p className="eyebrow">GULU SCREENING v1.3.0</p>
+            <p className="eyebrow">GULU SCREENING v1.4.0</p>
             <h1>
               {
                 (
@@ -609,7 +612,7 @@ export function App() {
               }
             </h1>
           </div>
-          <span className="shield">本机服务 · DeepSeek AI</span>
+          <span className="shield">{mode === "demo" ? "离线引擎 · 虚构演示数据" : "本机服务 · DeepSeek AI"}</span>
         </header>
         {notice && (
           <div className="notice" onClick={() => setNotice("")}>
@@ -637,6 +640,7 @@ export function App() {
                 <input
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
+                  disabled={mode === "demo"}
                 />
               </label>
               <label>
@@ -645,6 +649,7 @@ export function App() {
                   rows={8}
                   value={source}
                   onChange={(e) => setSource(e.target.value)}
+                  disabled={mode === "demo"}
                 />
               </label>
               <label className="upload">
@@ -653,11 +658,13 @@ export function App() {
                   type="file"
                   accept=".docx,.pdf,.txt"
                   onChange={(e) => setFile(e.target.files?.[0] || null)}
+                  disabled={mode === "demo"}
                 />
                 <span>{file?.name || "选择本机文件（最大 15MB）"}</span>
               </label>
-              <button className="primary wide" onClick={create} disabled={busy}>
-                {busy ? "DeepSeek 分析中…" : "生成岗位包 →"}
+              {mode === "demo" && <p className="demo-fixed-note">演示模式使用已经初始化的固定虚构岗位。你仍可审核规则、调整搜索条件、运行筛选并填写人工备注。</p>}
+              <button className="primary wide" onClick={create} disabled={busy || mode === "demo"}>
+                {mode === "demo" ? "演示岗位已就绪" : busy ? "DeepSeek 分析中…" : "生成岗位包 →"}
               </button>
             </div>
             <div className="panel">
@@ -875,12 +882,12 @@ export function App() {
                     >
                       重置规则与全部下游数据
                     </button>
-                    <a
+                    <button
                       className="button ghost"
-                      href={`/api/jobs/${selected}/guide.docx`}
+                      onClick={() => api.download(`/api/jobs/${selected}/guide.docx`, "job-guide.docx").catch((error) => setNotice(error.message))}
                     >
                       下载岗位说明
-                    </a>
+                    </button>
                   </div>
                 </div>
                 <div className="rules-grid">
@@ -967,8 +974,8 @@ export function App() {
                     重置运行中心
                   </button>
                 </div>
-                <div className="settings-grid">
-                <div className="panel">
+                <div className={`settings-grid ${mode === "demo" ? "demo-only" : ""}`}>
+                {mode === "live" && <div className="panel">
                   <div className="panel-title">
                     <span className="step">真</span>
                     <div>
@@ -1090,19 +1097,19 @@ export function App() {
                         .then((data) => setVerificationResults(data.items))
                     }
                   />
-                </div>
+                </div>}
                 <div className="panel">
                   <div className="panel-title">
                     <span className="step dark">备</span>
                     <div>
-                      <h2>离线模拟回退</h2>
-                      <p>不操作真实谷露，可随时验证岗位规则</p>
+                      <h2>{mode === "demo" ? "离线演示连接器" : "离线模拟回退"}</h2>
+                      <p>{mode === "demo" ? "模拟预检、翻页、暂停恢复和跨轮去重，不访问真实谷露" : "不操作真实谷露，可随时验证岗位规则"}</p>
                     </div>
                   </div>
                   {!demo ? (
                     <button
                       className="ghost wide"
-                      onClick={async () => setDemo(await api.runDemo(selected))}
+                      onClick={async () => { const next = await api.runDemo(selected); setDemo(next); setResultsRunId(next.id); }}
                     >
                       创建模拟运行
                     </button>
@@ -1112,11 +1119,12 @@ export function App() {
                         {demo.cursor} / {demo.total} · {demo.status}
                       </p>
                       <div className="action-bar">
+                        {demo.status === "running" && <button className="ghost" onClick={async () => setDemo(await api.pauseRun(demo.id))}>暂停</button>}
+                        {demo.status === "paused" && <button className="ghost" onClick={async () => setDemo(await api.resumeRun(demo.id))}>恢复</button>}
                         <button
-                          className="ghost"
-                          onClick={async () =>
-                            setDemo(await api.processRun(demo.id, 5))
-                          }
+                          className="primary"
+                          disabled={demo.status !== "running"}
+                          onClick={async () => { const next = await api.processRun(demo.id, 5); setDemo(next); if (next.status === "completed") setResults((await api.results(selected)).items); }}
                         >
                           处理下一批
                         </button>
@@ -1146,7 +1154,19 @@ export function App() {
             }
           />
         )}
-        {view === "settings" && (
+        {view === "settings" && mode === "demo" && (
+          <section className="panel demo-settings">
+            <p className="eyebrow">OFFLINE DEMO</p>
+            <h2>离线演示设置</h2>
+            <p>岗位、候选人、公司及结果均为虚构演示数据。重置不会读取或修改真实谷露数据库。</p>
+            <button className="danger" onClick={() => setDemoResetConfirm(true)}>一键恢复初始演示</button>
+            <button className="ghost" disabled={!selected} onClick={async () => {
+              try { const result = await api.dynamicDemoCampaign(selected); setCampaign(result.campaign); setView("run"); setNotice(result.fallback ? "动态 AI 不可用，已回退到预生成搜索战役，演示状态未丢失。" : "已使用个人 DeepSeek Key 动态生成搜索战役。"); }
+              catch (error: any) { setNotice(`动态生成失败，可继续使用离线结果：${error.message}`); }
+            }}>动态生成搜索战役（可选）</button>
+          </section>
+        )}
+        {view === "settings" && mode === "live" && (
           <section className="settings-grid">
             <div className="panel">
               <h2>谷露扩展配对</h2>
@@ -1268,6 +1288,22 @@ export function App() {
             onConfirm={startFresh}
           />
         )}{" "}
+        {demoResetConfirm && (
+          <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label="确认恢复演示数据">
+            <div className="new-task-dialog reset-dialog">
+              <p className="eyebrow">DEMO RESET</p><h2>恢复初始演示</h2>
+              <p>将事务性清空并重建全部虚构演示数据；真实谷露数据库不会被读取或修改。</p>
+              <div className="dialog-actions">
+                <button className="ghost" onClick={() => setDemoResetConfirm(false)}>取消</button>
+                <button className="danger" onClick={async () => {
+                  try { await api.resetDemo(); setSelected(""); setPack(null); setResults([]); await refreshJobs(); setView("jobs"); setNotice("虚构演示数据已恢复到初始状态。"); }
+                  catch (error: any) { setNotice(`演示重置失败，可重试：${error.message}`); }
+                  finally { setDemoResetConfirm(false); }
+                }}>确认恢复</button>
+              </div>
+            </div>
+          </div>
+        )}
         {resetTarget && (
           <div
             className="dialog-backdrop"
@@ -1809,12 +1845,12 @@ function Results({
           <button className="ghost" onClick={reload}>
             刷新
           </button>
-          <a
+          <button
             className="button primary"
-            href={`/api/jobs/${selected}/export.xlsx`}
+            onClick={() => api.download(`/api/jobs/${selected}/export.xlsx`, "screening-results.xlsx")}
           >
             导出 Excel
-          </a>
+          </button>
         </div>
       </div>
       <div className="result-list">

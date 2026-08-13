@@ -54,10 +54,20 @@ function styleDetailSheet(sheet: ExcelJS.Worksheet, rowCount: number): void {
   sheet.autoFilter = { from: 'A1', to: `M${Math.max(1, rowCount + 1)}` };
 }
 
-export async function buildWorkbook(db: DatabaseSync, jobId: string): Promise<Buffer> {
+type ExportOptions = { fictionalDemo?: boolean };
+
+export async function buildWorkbook(db: DatabaseSync, jobId: string, options: ExportOptions = {}): Promise<Buffer> {
   const rows = queryRows(db, jobId);
   const workbook = new ExcelJS.Workbook();
   workbook.creator = '谷露简历筛选 MVP';
+  if (options.fictionalDemo) {
+    workbook.title = '虚构演示数据';
+    const notice = workbook.addWorksheet('演示说明', { properties: { showGridLines: false } });
+    notice.addRow(['虚构演示数据']);
+    notice.addRow(['本文件中的岗位、候选人、公司和筛选结果均为产品演示用途，不对应真实个人或企业。']);
+    notice.getColumn(1).width = 90;
+    notice.getRow(1).font = { bold: true, size: 16, color: { argb: 'FFB42318' } };
+  }
   const groups: Array<[string, ExportRow[]]> = [
     ['全部', rows], ['推荐', rows.filter((r) => r.label === 'recommend')], ['复核', rows.filter((r) => r.label === 'review')], ['排除', rows.filter((r) => r.label === 'exclude')],
   ];
@@ -82,8 +92,9 @@ function csvEscape(value: string|number): string {
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
-export async function buildCsv(db: DatabaseSync, jobId: string): Promise<Buffer> {
-  const lines = [EXPORT_HEADERS, ...displayRows(queryRows(db, jobId))].map((row) => row.map(csvEscape).join(','));
+export async function buildCsv(db: DatabaseSync, jobId: string, options: ExportOptions = {}): Promise<Buffer> {
+  const prefix = options.fictionalDemo ? [['虚构演示数据'], ['以下岗位、候选人、公司和筛选结果均为虚构内容']] : [];
+  const lines = [...prefix, EXPORT_HEADERS, ...displayRows(queryRows(db, jobId))].map((row) => row.map(csvEscape).join(','));
   return Buffer.from(`\ufeff${lines.join('\r\n')}`, 'utf8');
 }
 

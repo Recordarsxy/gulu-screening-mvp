@@ -3,7 +3,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const port = process.env.PORT || '4318';
 const localUrl = `http://127.0.0.1:${port}`;
-const expectedVersion = '1.3.0';
+const expectedVersion = '1.4.0';
 
 async function healthPayload() {
   try {

@@ -40,7 +40,7 @@ describe('Chrome extension safety boundary', () => {
   it('reloads an unpacked extension automatically after its revision changes',async()=>{
     const source=await readFile(new URL('../extension/background.js',import.meta.url),'utf8');
     const revision=(await readFile(new URL('../extension/revision.txt',import.meta.url),'utf8')).trim();
-    expect(revision).toMatch(/^v1\.3\.0-/);
+    expect(revision).toMatch(/^v1\.4\.0-/);
     expect(source).toContain("chrome.runtime.getURL('revision.txt')");
     expect(source).toContain("cache: 'no-store'");
     expect(source).toContain('chrome.runtime.reload()');
